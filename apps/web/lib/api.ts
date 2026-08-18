@@ -1,9 +1,6 @@
 const API = process.env.NEXT_PUBLIC_API_URL || "http://localhost:3001";
 
-async function request<T>(
-  path: string,
-  options?: RequestInit
-): Promise<T> {
+async function request<T>(path: string, options?: RequestInit): Promise<T> {
   const res = await fetch(`${API}${path}`, {
     ...options,
     headers: {
@@ -28,37 +25,22 @@ async function request<T>(
 export const api = {
   listProjects: () => request<any[]>("/api/projects"),
   createProject: (name: string) =>
-    request<any>("/api/projects", {
-      method: "POST",
-      body: JSON.stringify({ name }),
-    }),
+    request<any>("/api/projects", { method: "POST", body: JSON.stringify({ name }) }),
   getProject: (id: string) => request<any>(`/api/projects/${id}`),
   updateProject: (id: string, name: string) =>
-    request<any>(`/api/projects/${id}`, {
-      method: "PUT",
-      body: JSON.stringify({ name }),
-    }),
+    request<any>(`/api/projects/${id}`, { method: "PUT", body: JSON.stringify({ name }) }),
   deleteProject: (id: string) =>
     request<void>(`/api/projects/${id}`, { method: "DELETE" }),
 
   listEnvironments: (projectId: string) =>
     request<any[]>(`/api/projects/${projectId}/environments`),
-  createEnvironment: (
-    projectId: string,
-    data: { name: string; baseUrl: string }
-  ) =>
+  createEnvironment: (projectId: string, data: { name: string; baseUrl: string }) =>
     request<any>(`/api/projects/${projectId}/environments`, {
       method: "POST",
       body: JSON.stringify(data),
     }),
-  updateEnvironment: (
-    id: string,
-    data: { name?: string; baseUrl?: string }
-  ) =>
-    request<any>(`/api/environments/${id}`, {
-      method: "PUT",
-      body: JSON.stringify(data),
-    }),
+  updateEnvironment: (id: string, data: { name?: string; baseUrl?: string }) =>
+    request<any>(`/api/environments/${id}`, { method: "PUT", body: JSON.stringify(data) }),
   deleteEnvironment: (id: string) =>
     request<void>(`/api/environments/${id}`, { method: "DELETE" }),
 
@@ -71,9 +53,11 @@ export const api = {
     }),
   getTest: (id: string) => request<any>(`/api/tests/${id}`),
   updateTest: (id: string, name: string) =>
-    request<any>(`/api/tests/${id}`, {
+    request<any>(`/api/tests/${id}`, { method: "PUT", body: JSON.stringify({ name }) }),
+  updateTestSettings: (id: string, settings: any) =>
+    request<any>(`/api/tests/${id}/settings`, {
       method: "PUT",
-      body: JSON.stringify({ name }),
+      body: JSON.stringify(settings),
     }),
   deleteTest: (id: string) =>
     request<void>(`/api/tests/${id}`, { method: "DELETE" }),
@@ -90,4 +74,35 @@ export const api = {
     }),
   getRun: (id: string) => request<any>(`/api/runs/${id}`),
   listRuns: (testId: string) => request<any[]>(`/api/tests/${testId}/runs`),
+
+  listModules: (projectId: string) =>
+    request<any[]>(`/api/projects/${projectId}/modules`),
+  createModule: (projectId: string, name: string) =>
+    request<any>(`/api/projects/${projectId}/modules`, {
+      method: "POST",
+      body: JSON.stringify({ name }),
+    }),
+  getModule: (id: string) => request<any>(`/api/modules/${id}`),
+  updateModuleSteps: (id: string, steps: any[]) =>
+    request<any>(`/api/modules/${id}/steps`, {
+      method: "PUT",
+      body: JSON.stringify({ steps }),
+    }),
+  deleteModule: (id: string) =>
+    request<void>(`/api/modules/${id}`, { method: "DELETE" }),
+
+  listSchedules: (testId?: string) =>
+    request<any[]>(`/api/schedules${testId ? `?testId=${testId}` : ""}`),
+  createSchedule: (data: {
+    testId: string;
+    environmentId: string;
+    intervalMinutes?: number;
+    notifyEmail?: string;
+    notifyWebhook?: string;
+  }) =>
+    request<any>("/api/schedules", { method: "POST", body: JSON.stringify(data) }),
+  updateSchedule: (id: string, data: any) =>
+    request<any>(`/api/schedules/${id}`, { method: "PUT", body: JSON.stringify(data) }),
+  deleteSchedule: (id: string) =>
+    request<void>(`/api/schedules/${id}`, { method: "DELETE" }),
 };
