@@ -125,9 +125,9 @@ export default function ProjectPage() {
     if (!moduleName.trim()) return;
     try {
       setError("");
-      await api.createModule(projectId, moduleName.trim());
+      const m = await api.createModule(projectId, moduleName.trim());
       setModuleName("");
-      await load();
+      window.location.href = `/modules/${m.id}`;
     } catch (err: any) {
       setError(err.message);
     }
@@ -271,17 +271,14 @@ export default function ProjectPage() {
             <button className="btn" onClick={createModule}>Create module</button>
           </div>
         </div>
-        <p className="muted" style={{ marginTop: 10 }}>
-          Modules are shared step sequences. Reference them from tests via a module step (API).
-        </p>
       </div>
 
       {modules.length === 0 && <div className="empty">No modules yet.</div>}
       {modules.map((m) => (
         <div key={m.id} className="card" style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
           <div>
-            <strong>{m.name}</strong>
-            <div className="muted">{m.steps?.length || 0} steps · id: {m.id}</div>
+            <a href={`/modules/${m.id}`}><strong>{m.name}</strong></a>
+            <div className="muted">{m.steps?.length || 0} steps</div>
           </div>
           <button className="btn btn-ghost btn-sm" style={{ color: "var(--danger)" }} onClick={() => deleteModule(m.id, m.name)}>
             Delete

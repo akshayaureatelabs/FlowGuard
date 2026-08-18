@@ -25,9 +25,8 @@ export default function RootLayout({
               FlowGuard
             </a>
             <nav>
-              <a href="/" className="active">
-                Projects
-              </a>
+              <a href="/">Projects</a>
+              <a href="/login">Sign in</a>
             </nav>
           </div>
         </header>
