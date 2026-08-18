@@ -4,6 +4,7 @@ import { useEffect, useState, useCallback } from "react";
 import { useParams } from "next/navigation";
 import { api } from "@/lib/api";
 import StepEditor, { EditorStep } from "@/components/editor/StepEditor";
+import { v4 as uuid } from "uuid";
 
 export default function TestEditorPage() {
   const params = useParams();
@@ -24,6 +25,8 @@ export default function TestEditorPage() {
   const [schedules, setSchedules] = useState<any[]>([]);
   const [intervalMin, setIntervalMin] = useState(60);
   const [notifyEmail, setNotifyEmail] = useState("");
+  const [importJson, setImportJson] = useState("");
+  const [showImport, setShowImport] = useState(false);
 
   const load = useCallback(async () => {
     try {
@@ -63,6 +66,26 @@ export default function TestEditorPage() {
       setError(err.message);
     } finally {
       setSaving(false);
+    }
+  };
+
+  const importSteps = () => {
+    try {
+      const parsed = JSON.parse(importJson);
+      if (!Array.isArray(parsed)) throw new Error("JSON must be an array of steps");
+      const normalized: EditorStep[] = parsed.map((s: any) => ({
+        id: s.id || uuid(),
+        type: s.type || "click",
+        name: s.name,
+        optional: s.optional,
+        config: s.config || {},
+      }));
+      setSteps((prev) => [...prev, ...normalized]);
+      setImportJson("");
+      setShowImport(false);
+      setMsg(`Imported ${normalized.length} step(s) from recorder`);
+    } catch (e: any) {
+      setError(e.message || "Invalid JSON");
     }
   };
 
@@ -147,7 +170,7 @@ export default function TestEditorPage() {
           </a>
         </p>
         <h1>{test?.name}</h1>
-        <p>Codeless editor · settings · schedule · run</p>
+        <p>Codeless editor · settings · schedule · run · import recorder JSON</p>
       </div>
 
       <div className="panel-box">
@@ -181,6 +204,9 @@ export default function TestEditorPage() {
           <div className="field">
             <label>&nbsp;</label>
             <div style={{ display: "flex", gap: 8 }}>
+              <button className="btn btn-ghost" onClick={() => setShowImport((v) => !v)}>
+                Import JSON
+              </button>
               <button className="btn btn-ghost" onClick={save} disabled={saving}>
                 {saving ? "Saving…" : "Save"}
               </button>
@@ -191,6 +217,27 @@ export default function TestEditorPage() {
           </div>
         </div>
       </div>
+
+      {showImport && (
+        <div className="panel-box">
+          <label>Paste FlowGuard recorder steps JSON</label>
+          <textarea
+            rows={8}
+            value={importJson}
+            onChange={(e) => setImportJson(e.target.value)}
+            placeholder='[{ "type": "navigate", "config": { "url": "https://..." } }, ...]'
+            style={{ width: "100%", fontFamily: "monospace", marginTop: 6 }}
+          />
+          <div style={{ display: "flex", gap: 8, marginTop: 10 }}>
+            <button className="btn" onClick={importSteps}>
+              Append steps
+            </button>
+            <button className="btn btn-ghost" onClick={() => setShowImport(false)}>
+              Cancel
+            </button>
+          </div>
+        </div>
+      )}
 
       {msg && <div className="alert-success">{msg}</div>}
       {error && <div className="alert-error">{error}</div>}
@@ -226,14 +273,9 @@ export default function TestEditorPage() {
             </button>
           </div>
         </div>
-        <p className="muted" style={{ marginTop: 10 }}>
-          Scheduler checks every 30s. Uses the selected environment above.
-        </p>
       </div>
 
-      {schedules.length === 0 && (
-        <div className="empty">No schedules yet.</div>
-      )}
+      {schedules.length === 0 && <div className="empty">No schedules yet.</div>}
       {schedules.map((s) => (
         <div
           key={s.id}
@@ -245,7 +287,6 @@ export default function TestEditorPage() {
             <div className="muted">
               {s.enabled ? "Enabled" : "Paused"}
               {s.nextRunAt && ` · next ${new Date(s.nextRunAt).toLocaleString()}`}
-              {s.notifyEmail && ` · ${s.notifyEmail}`}
             </div>
           </div>
           <div style={{ display: "flex", gap: 8 }}>
