@@ -1,6 +1,5 @@
 import { z } from "zod";
 
-// ─── Selector ────────────────────────────────────────────────────────────────
 export const SelectorSchema = z.object({
   primary: z.string().min(1),
   type: z.enum(["css", "xpath"]).default("css"),
@@ -8,7 +7,6 @@ export const SelectorSchema = z.object({
 });
 export type Selector = z.infer<typeof SelectorSchema>;
 
-// ─── Step types ──────────────────────────────────────────────────────────────
 export const StepTypeSchema = z.enum([
   "navigate",
   "click",
@@ -23,6 +21,8 @@ export const StepTypeSchema = z.enum([
   "screenshot",
   "module",
   "condition",
+  "accessibility",
+  "visualAssert",
 ]);
 export type StepType = z.infer<typeof StepTypeSchema>;
 
@@ -36,9 +36,7 @@ const BaseStepSchema = z.object({
 
 export const NavigateStepSchema = BaseStepSchema.extend({
   type: z.literal("navigate"),
-  config: z.object({
-    url: z.string().min(1),
-  }),
+  config: z.object({ url: z.string().min(1) }),
 });
 
 export const ClickStepSchema = BaseStepSchema.extend({
@@ -57,6 +55,24 @@ export const TypeStepSchema = BaseStepSchema.extend({
     value: z.string(),
     clearFirst: z.boolean().optional(),
   }),
+});
+
+export const ClearStepSchema = BaseStepSchema.extend({
+  type: z.literal("clear"),
+  config: z.object({ selector: SelectorSchema }),
+});
+
+export const SelectStepSchema = BaseStepSchema.extend({
+  type: z.literal("select"),
+  config: z.object({
+    selector: SelectorSchema,
+    value: z.string(),
+  }),
+});
+
+export const HoverStepSchema = BaseStepSchema.extend({
+  type: z.literal("hover"),
+  config: z.object({ selector: SelectorSchema }),
 });
 
 export const WaitStepSchema = BaseStepSchema.extend({
@@ -113,19 +129,41 @@ export const ModuleStepSchema = BaseStepSchema.extend({
   }),
 });
 
+export const AccessibilityStepSchema = BaseStepSchema.extend({
+  type: z.literal("accessibility"),
+  config: z.object({
+    standard: z.enum(["wcag2a", "wcag2aa", "wcag21aa"]).default("wcag2aa"),
+    selector: SelectorSchema.optional(),
+  }),
+});
+
+export const VisualAssertStepSchema = BaseStepSchema.extend({
+  type: z.literal("visualAssert"),
+  config: z.object({
+    baselineName: z.string().min(1),
+    threshold: z.number().min(0).max(1).optional(),
+    selector: SelectorSchema.optional(),
+    fullPage: z.boolean().optional(),
+  }),
+});
+
 export const StepSchema = z.discriminatedUnion("type", [
   NavigateStepSchema,
   ClickStepSchema,
   TypeStepSchema,
+  ClearStepSchema,
+  SelectStepSchema,
+  HoverStepSchema,
   WaitStepSchema,
   AssertStepSchema,
   JavascriptStepSchema,
   ScreenshotStepSchema,
   ModuleStepSchema,
+  AccessibilityStepSchema,
+  VisualAssertStepSchema,
 ]);
 export type Step = z.infer<typeof StepSchema>;
 
-// ─── Domain entities ─────────────────────────────────────────────────────────
 export const ProjectSchema = z.object({
   id: z.string(),
   name: z.string().min(1),
@@ -154,6 +192,7 @@ export const TestSettingsSchema = z.object({
     })
     .optional(),
   geolocation: z.string().optional(),
+  parallel: z.boolean().optional(),
 });
 export type TestSettings = z.infer<typeof TestSettingsSchema>;
 
@@ -178,12 +217,29 @@ export const ModuleSchema = z.object({
 });
 export type Module = z.infer<typeof ModuleSchema>;
 
+export const ScheduleSchema = z.object({
+  id: z.string(),
+  testId: z.string(),
+  environmentId: z.string(),
+  enabled: z.boolean().default(true),
+  intervalMinutes: z.number().int().positive().optional(),
+  cron: z.string().optional(),
+  notifyEmail: z.string().optional(),
+  notifyWebhook: z.string().optional(),
+  lastRunAt: z.string().optional(),
+  nextRunAt: z.string().optional(),
+  createdAt: z.string(),
+  updatedAt: z.string(),
+});
+export type Schedule = z.infer<typeof ScheduleSchema>;
+
 export const StepResultSchema = z.object({
   stepId: z.string(),
   status: z.enum(["passed", "failed", "skipped"]),
   error: z.string().optional(),
   screenshot: z.string().optional(),
   durationMs: z.number().optional(),
+  meta: z.record(z.any()).optional(),
 });
 export type StepResult = z.infer<typeof StepResultSchema>;
 
@@ -207,7 +263,6 @@ export const TestRunSchema = z.object({
 });
 export type TestRun = z.infer<typeof TestRunSchema>;
 
-// ─── API request helpers ─────────────────────────────────────────────────────
 export const CreateProjectBody = z.object({ name: z.string().min(1) });
 export const CreateEnvironmentBody = z.object({
   name: z.string().min(1),
@@ -217,3 +272,14 @@ export const CreateEnvironmentBody = z.object({
 export const CreateTestBody = z.object({ name: z.string().min(1) });
 export const UpdateStepsBody = z.object({ steps: z.array(StepSchema) });
 export const CreateRunBody = z.object({ environmentId: z.string().min(1) });
+export const CreateModuleBody = z.object({ name: z.string().min(1) });
+export const CreateScheduleBody = z.object({
+  testId: z.string().min(1),
+  environmentId: z.string().min(1),
+  intervalMinutes: z.number().int().positive().optional(),
+  cron: z.string().optional(),
+  notifyEmail: z.string().optional(),
+  notifyWebhook: z.string().optional(),
+  enabled: z.boolean().optional(),
+});
+export const UpdateTestSettingsBody = TestSettingsSchema;
