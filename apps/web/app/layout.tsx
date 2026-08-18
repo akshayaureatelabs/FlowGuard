@@ -4,6 +4,9 @@ import "./globals.css";
 export const metadata: Metadata = {
   title: "FlowGuard",
   description: "Codeless browser test automation",
+  icons: {
+    icon: [{ url: "/icon.svg", type: "image/svg+xml" }],
+  },
 };
 
 export default function RootLayout({
