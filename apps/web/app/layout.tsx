@@ -2,8 +2,9 @@ import type { Metadata } from "next";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "FlowGuard",
-  description: "Codeless browser test automation",
+  title: "FlowGuard — Codeless browser testing",
+  description:
+    "Record, edit, and monitor automated browser tests without writing code.",
   icons: {
     icon: [{ url: "/icon.svg", type: "image/svg+xml" }],
   },
@@ -18,12 +19,15 @@ export default function RootLayout({
     <html lang="en">
       <body>
         <header className="header">
-          <div className="container header-inner">
+          <div className="header-inner">
             <a href="/" className="logo">
+              <span className="logo-mark">✓</span>
               FlowGuard
             </a>
             <nav>
-              <a href="/">Projects</a>
+              <a href="/" className="active">
+                Projects
+              </a>
             </nav>
           </div>
         </header>

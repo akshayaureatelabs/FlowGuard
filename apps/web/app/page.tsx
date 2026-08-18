@@ -76,31 +76,46 @@ export default function HomePage() {
 
   return (
     <div>
-      <h1>Projects</h1>
+      <div className="page-header">
+        <h1>Projects</h1>
+        <p>
+          Organize tests by website or app. Anyone on the team can create and
+          maintain tests — no coding required.
+        </p>
+      </div>
 
-      <div className="form-row">
-        <div className="field">
-          <label>New project name</label>
-          <input
-            value={name}
-            onChange={(e) => setName(e.target.value)}
-            placeholder="My website"
-            onKeyDown={(e) => e.key === "Enter" && create()}
-          />
-        </div>
-        <div className="field" style={{ justifyContent: "flex-end" }}>
-          <label>&nbsp;</label>
-          <button className="btn" onClick={create}>
-            Create Project
-          </button>
+      <div className="panel-box">
+        <div className="form-row" style={{ marginBottom: 0 }}>
+          <div className="field" style={{ flex: 1 }}>
+            <label>New project name</label>
+            <input
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              placeholder="e.g. Marketing site, Checkout app"
+              onKeyDown={(e) => e.key === "Enter" && create()}
+              style={{ width: "100%", minWidth: 0 }}
+            />
+          </div>
+          <div className="field">
+            <label>&nbsp;</label>
+            <button className="btn" onClick={create}>
+              Create project
+            </button>
+          </div>
         </div>
       </div>
 
-      {error && <p style={{ color: "var(--danger)" }}>{error}</p>}
-      {loading && <p className="muted">Loading…</p>}
+      {error && <div className="alert-error">{error}</div>}
+      {loading && <p className="muted">Loading projects…</p>}
 
       {!loading && projects.length === 0 && (
-        <div className="empty">No projects yet. Create one above.</div>
+        <div className="empty">
+          <strong style={{ display: "block", marginBottom: 6, color: "var(--text)" }}>
+            No projects yet
+          </strong>
+          Create your first project above to start recording and running browser
+          tests.
+        </div>
       )}
 
       {projects.map((p) => (
@@ -142,7 +157,7 @@ export default function HomePage() {
               <>
                 <a href={`/projects/${p.id}`}>{p.name}</a>
                 <div className="muted" style={{ marginTop: 4 }}>
-                  {new Date(p.createdAt).toLocaleString()}
+                  Created {new Date(p.createdAt).toLocaleString()}
                 </div>
               </>
             )}
