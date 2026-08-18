@@ -1,3 +1,5 @@
+import { authHeaders, clearSession } from "./auth";
+
 const API = process.env.NEXT_PUBLIC_API_URL || "http://localhost:3001";
 
 async function request<T>(path: string, options?: RequestInit): Promise<T> {
@@ -5,9 +7,13 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
     ...options,
     headers: {
       "Content-Type": "application/json",
+      ...authHeaders(),
       ...(options?.headers || {}),
     },
   });
+  if (res.status === 401) {
+    clearSession();
+  }
   if (!res.ok) {
     const body = await res.json().catch(() => ({}));
     throw new Error(
@@ -23,6 +29,12 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
 }
 
 export const api = {
+  register: (data: { email: string; password: string; name?: string }) =>
+    request<any>("/api/auth/register", { method: "POST", body: JSON.stringify(data) }),
+  login: (data: { email: string; password: string }) =>
+    request<any>("/api/auth/login", { method: "POST", body: JSON.stringify(data) }),
+  me: () => request<any>("/api/auth/me"),
+
   listProjects: () => request<any[]>("/api/projects"),
   createProject: (name: string) =>
     request<any>("/api/projects", { method: "POST", body: JSON.stringify({ name }) }),

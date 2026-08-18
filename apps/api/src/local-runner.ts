@@ -2,7 +2,7 @@ import { chromium, firefox, type Browser, type Page, type Locator } from "playwr
 import path from "path";
 import fs from "fs";
 import type { Test, Environment, Step, StepResult, Module } from "@flowguard/shared";
-import { store } from "./store.js";
+import { repo } from "./repo.js";
 
 const ARTIFACTS_DIR =
   process.env.ARTIFACTS_DIR || path.join(process.cwd(), "artifacts");
@@ -46,11 +46,7 @@ async function executeStep(
 ): Promise<StepResult[]> {
   const start = Date.now();
   const one = (partial: Partial<StepResult> & { status: StepResult["status"] }): StepResult[] => [
-    {
-      stepId: step.id,
-      durationMs: Date.now() - start,
-      ...partial,
-    },
+    { stepId: step.id, durationMs: Date.now() - start, ...partial },
   ];
 
   try {
@@ -149,14 +145,16 @@ async function executeStep(
         break;
       }
       case "accessibility": {
-        // Lightweight a11y heuristics (full axe can be added later)
         const issues: string[] = [];
         const imgs = await page.locator("img:not([alt])").count();
         if (imgs > 0) issues.push(`${imgs} image(s) missing alt`);
-        const emptyButtons = await page.locator("button:not([aria-label])").evaluateAll(
-          (nodes) => nodes.filter((n) => !(n as HTMLElement).innerText?.trim()).length
-        );
-        if (emptyButtons > 0) issues.push(`${emptyButtons} button(s) without accessible name`);
+        const emptyButtons = await page
+          .locator("button:not([aria-label])")
+          .evaluateAll(
+            (nodes) => nodes.filter((n) => !(n as HTMLElement).innerText?.trim()).length
+          );
+        if (emptyButtons > 0)
+          issues.push(`${emptyButtons} button(s) without accessible name`);
         if (issues.length) {
           throw new Error(`A11y (${step.config.standard}): ${issues.join("; ")}`);
         }
@@ -183,7 +181,6 @@ async function executeStep(
             meta: { baselineCreated: true, baselinePath },
           });
         }
-        // Simple size/byte compare for MVP (pixelmatch can replace later)
         const a = fs.readFileSync(baselinePath);
         const b = fs.readFileSync(currentPath);
         const threshold = step.config.threshold ?? 0.01;
@@ -195,7 +192,6 @@ async function executeStep(
             );
           }
         } else if (!a.equals(b)) {
-          // bytes differ but same size — flag as soft fail for MVP
           const mismatch = a.reduce((n, byte, i) => n + (byte !== b[i] ? 1 : 0), 0);
           const ratio = mismatch / a.length;
           if (ratio > threshold) {
@@ -241,7 +237,7 @@ export async function runLocalTest(
   test: Test,
   env: Environment
 ): Promise<void> {
-  store.updateRun(runId, {
+  await repo.updateRun(runId, {
     status: "running",
     startedAt: new Date().toISOString(),
   });
@@ -252,9 +248,8 @@ export async function runLocalTest(
 
   let browser: Browser | null = null;
   const results: StepResult[] = [];
-  const modules = new Map(
-    store.listModules(test.projectId).map((m) => [m.id, m] as const)
-  );
+  const moduleList = await repo.listModules(test.projectId);
+  const modules = new Map(moduleList.map((m) => [m.id, m] as const));
   const vars = { ...(env.variables || {}) };
 
   try {
@@ -290,14 +285,14 @@ export async function runLocalTest(
     await page.screenshot({ path: finalShot, fullPage: true }).catch(() => {});
 
     const failed = results.some((r) => r.status === "failed");
-    store.updateRun(runId, {
+    await repo.updateRun(runId, {
       status: failed ? "failed" : "passed",
       finishedAt: new Date().toISOString(),
       stepsResults: results,
       artifacts: { finalScreenshot: finalShot },
     });
   } catch (err: any) {
-    store.updateRun(runId, {
+    await repo.updateRun(runId, {
       status: "error",
       error: err?.message || String(err),
       finishedAt: new Date().toISOString(),
