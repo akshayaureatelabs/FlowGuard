@@ -7,6 +7,9 @@ import {
   CreateTestBody,
   UpdateStepsBody,
   CreateRunBody,
+  CreateModuleBody,
+  CreateScheduleBody,
+  UpdateTestSettingsBody,
 } from "@flowguard/shared";
 import { store } from "./store.js";
 import { runLocalTest } from "./local-runner.js";
@@ -21,18 +24,14 @@ app.get("/health", (_req, res) => {
   res.json({ status: "ok", time: new Date().toISOString() });
 });
 
-// ── Projects ────────────────────────────────────────────────────────────────
 app.get("/api/projects", (_req, res) => {
   res.json(store.listProjects());
 });
 
 app.post("/api/projects", (req, res) => {
   const parsed = CreateProjectBody.safeParse(req.body);
-  if (!parsed.success) {
-    return res.status(400).json({ error: parsed.error.flatten() });
-  }
-  const project = store.createProject(parsed.data.name);
-  res.status(201).json(project);
+  if (!parsed.success) return res.status(400).json({ error: parsed.error.flatten() });
+  res.status(201).json(store.createProject(parsed.data.name));
 });
 
 app.get("/api/projects/:id", (req, res) => {
@@ -43,40 +42,35 @@ app.get("/api/projects/:id", (req, res) => {
 
 app.put("/api/projects/:id", (req, res) => {
   const parsed = CreateProjectBody.safeParse(req.body);
-  if (!parsed.success) {
-    return res.status(400).json({ error: parsed.error.flatten() });
-  }
+  if (!parsed.success) return res.status(400).json({ error: parsed.error.flatten() });
   const project = store.updateProject(req.params.id, parsed.data.name);
   if (!project) return res.status(404).json({ error: "Project not found" });
   res.json(project);
 });
 
 app.delete("/api/projects/:id", (req, res) => {
-  const ok = store.deleteProject(req.params.id);
-  if (!ok) return res.status(404).json({ error: "Project not found" });
+  if (!store.deleteProject(req.params.id))
+    return res.status(404).json({ error: "Project not found" });
   res.status(204).send();
 });
 
-// ── Environments ────────────────────────────────────────────────────────────
 app.get("/api/projects/:projectId/environments", (req, res) => {
   res.json(store.listEnvironments(req.params.projectId));
 });
 
 app.post("/api/projects/:projectId/environments", (req, res) => {
-  const project = store.getProject(req.params.projectId);
-  if (!project) return res.status(404).json({ error: "Project not found" });
-
+  if (!store.getProject(req.params.projectId))
+    return res.status(404).json({ error: "Project not found" });
   const parsed = CreateEnvironmentBody.safeParse(req.body);
-  if (!parsed.success) {
-    return res.status(400).json({ error: parsed.error.flatten() });
-  }
-  const env = store.createEnvironment(
-    req.params.projectId,
-    parsed.data.name,
-    parsed.data.baseUrl,
-    parsed.data.variables
+  if (!parsed.success) return res.status(400).json({ error: parsed.error.flatten() });
+  res.status(201).json(
+    store.createEnvironment(
+      req.params.projectId,
+      parsed.data.name,
+      parsed.data.baseUrl,
+      parsed.data.variables
+    )
   );
-  res.status(201).json(env);
 });
 
 app.put("/api/environments/:id", (req, res) => {
@@ -90,26 +84,21 @@ app.put("/api/environments/:id", (req, res) => {
 });
 
 app.delete("/api/environments/:id", (req, res) => {
-  const ok = store.deleteEnvironment(req.params.id);
-  if (!ok) return res.status(404).json({ error: "Environment not found" });
+  if (!store.deleteEnvironment(req.params.id))
+    return res.status(404).json({ error: "Environment not found" });
   res.status(204).send();
 });
 
-// ── Tests ───────────────────────────────────────────────────────────────────
 app.get("/api/projects/:projectId/tests", (req, res) => {
   res.json(store.listTests(req.params.projectId));
 });
 
 app.post("/api/projects/:projectId/tests", (req, res) => {
-  const project = store.getProject(req.params.projectId);
-  if (!project) return res.status(404).json({ error: "Project not found" });
-
+  if (!store.getProject(req.params.projectId))
+    return res.status(404).json({ error: "Project not found" });
   const parsed = CreateTestBody.safeParse(req.body);
-  if (!parsed.success) {
-    return res.status(400).json({ error: parsed.error.flatten() });
-  }
-  const test = store.createTest(req.params.projectId, parsed.data.name);
-  res.status(201).json(test);
+  if (!parsed.success) return res.status(400).json({ error: parsed.error.flatten() });
+  res.status(201).json(store.createTest(req.params.projectId, parsed.data.name));
 });
 
 app.get("/api/tests/:id", (req, res) => {
@@ -120,49 +109,44 @@ app.get("/api/tests/:id", (req, res) => {
 
 app.put("/api/tests/:id", (req, res) => {
   const parsed = CreateTestBody.safeParse(req.body);
-  if (!parsed.success) {
-    return res.status(400).json({ error: parsed.error.flatten() });
-  }
+  if (!parsed.success) return res.status(400).json({ error: parsed.error.flatten() });
   const test = store.updateTest(req.params.id, parsed.data.name);
   if (!test) return res.status(404).json({ error: "Test not found" });
   res.json(test);
 });
 
+app.put("/api/tests/:id/settings", (req, res) => {
+  const parsed = UpdateTestSettingsBody.safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ error: parsed.error.flatten() });
+  const test = store.updateTestSettings(req.params.id, parsed.data);
+  if (!test) return res.status(404).json({ error: "Test not found" });
+  res.json(test);
+});
+
 app.delete("/api/tests/:id", (req, res) => {
-  const ok = store.deleteTest(req.params.id);
-  if (!ok) return res.status(404).json({ error: "Test not found" });
+  if (!store.deleteTest(req.params.id))
+    return res.status(404).json({ error: "Test not found" });
   res.status(204).send();
 });
 
 app.put("/api/tests/:id/steps", (req, res) => {
   const parsed = UpdateStepsBody.safeParse(req.body);
-  if (!parsed.success) {
-    return res.status(400).json({ error: parsed.error.flatten() });
-  }
-  const steps = parsed.data.steps.map((s) => ({
-    ...s,
-    id: s.id || uuid(),
-  }));
+  if (!parsed.success) return res.status(400).json({ error: parsed.error.flatten() });
+  const steps = parsed.data.steps.map((s) => ({ ...s, id: s.id || uuid() }));
   const test = store.updateSteps(req.params.id, steps);
   if (!test) return res.status(404).json({ error: "Test not found" });
   res.json(test);
 });
 
-// ── Runs ────────────────────────────────────────────────────────────────────
 app.post("/api/tests/:id/runs", async (req, res) => {
   const test = store.getTest(req.params.id);
   if (!test) return res.status(404).json({ error: "Test not found" });
-
   const parsed = CreateRunBody.safeParse(req.body);
-  if (!parsed.success) {
-    return res.status(400).json({ error: parsed.error.flatten() });
-  }
-
+  if (!parsed.success) return res.status(400).json({ error: parsed.error.flatten() });
   const env = store.getEnvironment(parsed.data.environmentId);
   if (!env) return res.status(404).json({ error: "Environment not found" });
 
   const run = store.createRun(test.id, env.id);
-
   const useLocal =
     process.env.USE_LOCAL_EXECUTION === "true" ||
     process.env.USE_LOCAL_EXECUTION === undefined;
@@ -177,7 +161,6 @@ app.post("/api/tests/:id/runs", async (req, res) => {
       });
     });
   }
-
   res.status(201).json(run);
 });
 
@@ -191,7 +174,95 @@ app.get("/api/tests/:id/runs", (req, res) => {
   res.json(store.listRuns(req.params.id));
 });
 
+// ── Modules ─────────────────────────────────────────────────────────────────
+app.get("/api/projects/:projectId/modules", (req, res) => {
+  res.json(store.listModules(req.params.projectId));
+});
+
+app.post("/api/projects/:projectId/modules", (req, res) => {
+  if (!store.getProject(req.params.projectId))
+    return res.status(404).json({ error: "Project not found" });
+  const parsed = CreateModuleBody.safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ error: parsed.error.flatten() });
+  res.status(201).json(store.createModule(req.params.projectId, parsed.data.name));
+});
+
+app.get("/api/modules/:id", (req, res) => {
+  const mod = store.getModule(req.params.id);
+  if (!mod) return res.status(404).json({ error: "Module not found" });
+  res.json(mod);
+});
+
+app.put("/api/modules/:id/steps", (req, res) => {
+  const parsed = UpdateStepsBody.safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ error: parsed.error.flatten() });
+  const steps = parsed.data.steps.map((s) => ({ ...s, id: s.id || uuid() }));
+  const mod = store.updateModuleSteps(req.params.id, steps);
+  if (!mod) return res.status(404).json({ error: "Module not found" });
+  res.json(mod);
+});
+
+app.delete("/api/modules/:id", (req, res) => {
+  if (!store.deleteModule(req.params.id))
+    return res.status(404).json({ error: "Module not found" });
+  res.status(204).send();
+});
+
+// ── Schedules ───────────────────────────────────────────────────────────────
+app.get("/api/schedules", (req, res) => {
+  const testId = req.query.testId as string | undefined;
+  res.json(store.listSchedules(testId));
+});
+
+app.post("/api/schedules", (req, res) => {
+  const parsed = CreateScheduleBody.safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ error: parsed.error.flatten() });
+  if (!store.getTest(parsed.data.testId))
+    return res.status(404).json({ error: "Test not found" });
+  if (!store.getEnvironment(parsed.data.environmentId))
+    return res.status(404).json({ error: "Environment not found" });
+  res.status(201).json(store.createSchedule(parsed.data));
+});
+
+app.put("/api/schedules/:id", (req, res) => {
+  const sch = store.updateSchedule(req.params.id, req.body || {});
+  if (!sch) return res.status(404).json({ error: "Schedule not found" });
+  res.json(sch);
+});
+
+app.delete("/api/schedules/:id", (req, res) => {
+  if (!store.deleteSchedule(req.params.id))
+    return res.status(404).json({ error: "Schedule not found" });
+  res.status(204).send();
+});
+
+// Background scheduler — every 30s check due schedules
+setInterval(() => {
+  const due = store.dueSchedules();
+  for (const sch of due) {
+    const test = store.getTest(sch.testId);
+    const env = store.getEnvironment(sch.environmentId);
+    if (!test || !env) continue;
+    const run = store.createRun(test.id, env.id);
+    const interval = sch.intervalMinutes || 60;
+    store.updateSchedule(sch.id, {
+      lastRunAt: new Date().toISOString(),
+      nextRunAt: new Date(Date.now() + interval * 60_000).toISOString(),
+    });
+    runLocalTest(run.id, test, env).catch((err) => {
+      console.error("Scheduled run failed:", err);
+      store.updateRun(run.id, {
+        status: "error",
+        error: String(err),
+        finishedAt: new Date().toISOString(),
+      });
+    });
+    console.log(`[scheduler] triggered schedule ${sch.id} → run ${run.id}`);
+  }
+}, 30_000);
+
 app.listen(PORT, () => {
   console.log(`FlowGuard API listening on http://localhost:${PORT}`);
   console.log(`USE_LOCAL_EXECUTION=${process.env.USE_LOCAL_EXECUTION ?? "true"}`);
+  console.log("Scheduler tick every 30s");
 });
