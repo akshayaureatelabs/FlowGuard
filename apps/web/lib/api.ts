@@ -13,8 +13,15 @@ async function request<T>(
   });
   if (!res.ok) {
     const body = await res.json().catch(() => ({}));
-    throw new Error(body.error || res.statusText);
+    throw new Error(
+      typeof body.error === "string"
+        ? body.error
+        : body.error
+        ? JSON.stringify(body.error)
+        : res.statusText
+    );
   }
+  if (res.status === 204) return undefined as T;
   return res.json();
 }
 
@@ -26,6 +33,13 @@ export const api = {
       body: JSON.stringify({ name }),
     }),
   getProject: (id: string) => request<any>(`/api/projects/${id}`),
+  updateProject: (id: string, name: string) =>
+    request<any>(`/api/projects/${id}`, {
+      method: "PUT",
+      body: JSON.stringify({ name }),
+    }),
+  deleteProject: (id: string) =>
+    request<void>(`/api/projects/${id}`, { method: "DELETE" }),
 
   listEnvironments: (projectId: string) =>
     request<any[]>(`/api/projects/${projectId}/environments`),
@@ -37,6 +51,16 @@ export const api = {
       method: "POST",
       body: JSON.stringify(data),
     }),
+  updateEnvironment: (
+    id: string,
+    data: { name?: string; baseUrl?: string }
+  ) =>
+    request<any>(`/api/environments/${id}`, {
+      method: "PUT",
+      body: JSON.stringify(data),
+    }),
+  deleteEnvironment: (id: string) =>
+    request<void>(`/api/environments/${id}`, { method: "DELETE" }),
 
   listTests: (projectId: string) =>
     request<any[]>(`/api/projects/${projectId}/tests`),
@@ -46,6 +70,13 @@ export const api = {
       body: JSON.stringify({ name }),
     }),
   getTest: (id: string) => request<any>(`/api/tests/${id}`),
+  updateTest: (id: string, name: string) =>
+    request<any>(`/api/tests/${id}`, {
+      method: "PUT",
+      body: JSON.stringify({ name }),
+    }),
+  deleteTest: (id: string) =>
+    request<void>(`/api/tests/${id}`, { method: "DELETE" }),
   updateSteps: (testId: string, steps: any[]) =>
     request<any>(`/api/tests/${testId}/steps`, {
       method: "PUT",

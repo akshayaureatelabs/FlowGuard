@@ -35,6 +35,32 @@ class MemoryStore {
     return this.projects.get(id);
   }
 
+  updateProject(id: string, name: string): Project | undefined {
+    const project = this.projects.get(id);
+    if (!project) return undefined;
+    project.name = name;
+    project.updatedAt = now();
+    this.projects.set(id, project);
+    return project;
+  }
+
+  deleteProject(id: string): boolean {
+    if (!this.projects.has(id)) return false;
+    this.projects.delete(id);
+    for (const [eid, env] of this.environments) {
+      if (env.projectId === id) this.environments.delete(eid);
+    }
+    for (const [tid, test] of this.tests) {
+      if (test.projectId === id) {
+        this.tests.delete(tid);
+        for (const [rid, run] of this.runs) {
+          if (run.testId === tid) this.runs.delete(rid);
+        }
+      }
+    }
+    return true;
+  }
+
   createEnvironment(
     projectId: string,
     name: string,
@@ -65,6 +91,24 @@ class MemoryStore {
     return this.environments.get(id);
   }
 
+  updateEnvironment(
+    id: string,
+    data: { name?: string; baseUrl?: string; variables?: Record<string, string> }
+  ): Environment | undefined {
+    const env = this.environments.get(id);
+    if (!env) return undefined;
+    if (data.name !== undefined) env.name = data.name;
+    if (data.baseUrl !== undefined) env.baseUrl = data.baseUrl;
+    if (data.variables !== undefined) env.variables = data.variables;
+    env.updatedAt = now();
+    this.environments.set(id, env);
+    return env;
+  }
+
+  deleteEnvironment(id: string): boolean {
+    return this.environments.delete(id);
+  }
+
   createTest(projectId: string, name: string): Test {
     const id = uuid();
     const test: Test = {
@@ -87,6 +131,24 @@ class MemoryStore {
 
   getTest(id: string): Test | undefined {
     return this.tests.get(id);
+  }
+
+  updateTest(id: string, name: string): Test | undefined {
+    const test = this.tests.get(id);
+    if (!test) return undefined;
+    test.name = name;
+    test.updatedAt = now();
+    this.tests.set(id, test);
+    return test;
+  }
+
+  deleteTest(id: string): boolean {
+    if (!this.tests.has(id)) return false;
+    this.tests.delete(id);
+    for (const [rid, run] of this.runs) {
+      if (run.testId === id) this.runs.delete(rid);
+    }
+    return true;
   }
 
   updateSteps(testId: string, steps: Step[]): Test | undefined {
