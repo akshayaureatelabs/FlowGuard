@@ -1,16 +1,14 @@
+import { createRequire } from "module";
 import { useDatabase } from "./db.js";
 import { store as memoryStore } from "./store.js";
-import { PrismaStore } from "./prisma-store.js";
 import type {
-  Project,
-  Environment,
-  Test,
   TestRun,
   Step,
-  Module,
   Schedule,
   TestSettings,
 } from "@flowguard/shared";
+
+const require = createRequire(import.meta.url);
 
 /** Unified async data access — Prisma when USE_DATABASE=true, else memory. */
 class MemoryAsync {
@@ -130,6 +128,12 @@ class MemoryAsync {
   }
 }
 
-export const repo = useDatabase ? new PrismaStore() : new MemoryAsync();
+function createRepo() {
+  if (useDatabase) {
+    const { PrismaStore } = require("./prisma-store.js");
+    return new PrismaStore();
+  }
+  return new MemoryAsync();
+}
 
-export type { Project, Environment, Test, TestRun, Step, Module, Schedule };
+export const repo = createRepo();

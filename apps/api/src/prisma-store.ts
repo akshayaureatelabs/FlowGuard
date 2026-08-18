@@ -1,4 +1,4 @@
-import { prisma } from "./db.js";
+import { getPrisma } from "./db.js";
 import type {
   Project,
   Environment,
@@ -9,6 +9,12 @@ import type {
   Schedule,
   TestSettings,
 } from "@flowguard/shared";
+
+function prisma() {
+  const p = getPrisma();
+  if (!p) throw new Error("USE_DATABASE is not true");
+  return p;
+}
 
 function toIso(d: Date | string) {
   return typeof d === "string" ? d : d.toISOString();
@@ -92,25 +98,25 @@ function mapSchedule(s: any): Schedule {
 
 export class PrismaStore {
   async createProject(name: string): Promise<Project> {
-    return mapProject(await prisma.project.create({ data: { name } }));
+    return mapProject(await prisma().project.create({ data: { name } }));
   }
   async listProjects(): Promise<Project[]> {
-    return (await prisma.project.findMany({ orderBy: { createdAt: "desc" } })).map(mapProject);
+    return (await prisma().project.findMany({ orderBy: { createdAt: "desc" } })).map(mapProject);
   }
   async getProject(id: string): Promise<Project | undefined> {
-    const p = await prisma.project.findUnique({ where: { id } });
+    const p = await prisma().project.findUnique({ where: { id } });
     return p ? mapProject(p) : undefined;
   }
   async updateProject(id: string, name: string): Promise<Project | undefined> {
     try {
-      return mapProject(await prisma.project.update({ where: { id }, data: { name } }));
+      return mapProject(await prisma().project.update({ where: { id }, data: { name } }));
     } catch {
       return undefined;
     }
   }
   async deleteProject(id: string): Promise<boolean> {
     try {
-      await prisma.project.delete({ where: { id } });
+      await prisma().project.delete({ where: { id } });
       return true;
     } catch {
       return false;
@@ -124,16 +130,16 @@ export class PrismaStore {
     variables?: Record<string, string>
   ): Promise<Environment> {
     return mapEnv(
-      await prisma.environment.create({
+      await prisma().environment.create({
         data: { projectId, name, baseUrl, variables: variables || {} },
       })
     );
   }
   async listEnvironments(projectId: string): Promise<Environment[]> {
-    return (await prisma.environment.findMany({ where: { projectId } })).map(mapEnv);
+    return (await prisma().environment.findMany({ where: { projectId } })).map(mapEnv);
   }
   async getEnvironment(id: string): Promise<Environment | undefined> {
-    const e = await prisma.environment.findUnique({ where: { id } });
+    const e = await prisma().environment.findUnique({ where: { id } });
     return e ? mapEnv(e) : undefined;
   }
   async updateEnvironment(
@@ -141,14 +147,14 @@ export class PrismaStore {
     data: { name?: string; baseUrl?: string; variables?: Record<string, string> }
   ): Promise<Environment | undefined> {
     try {
-      return mapEnv(await prisma.environment.update({ where: { id }, data }));
+      return mapEnv(await prisma().environment.update({ where: { id }, data }));
     } catch {
       return undefined;
     }
   }
   async deleteEnvironment(id: string): Promise<boolean> {
     try {
-      await prisma.environment.delete({ where: { id } });
+      await prisma().environment.delete({ where: { id } });
       return true;
     } catch {
       return false;
@@ -157,7 +163,7 @@ export class PrismaStore {
 
   async createTest(projectId: string, name: string): Promise<Test> {
     return mapTest(
-      await prisma.test.create({
+      await prisma().test.create({
         data: {
           projectId,
           name,
@@ -168,26 +174,26 @@ export class PrismaStore {
     );
   }
   async listTests(projectId: string): Promise<Test[]> {
-    return (await prisma.test.findMany({ where: { projectId } })).map(mapTest);
+    return (await prisma().test.findMany({ where: { projectId } })).map(mapTest);
   }
   async getTest(id: string): Promise<Test | undefined> {
-    const t = await prisma.test.findUnique({ where: { id } });
+    const t = await prisma().test.findUnique({ where: { id } });
     return t ? mapTest(t) : undefined;
   }
   async updateTest(id: string, name: string): Promise<Test | undefined> {
     try {
-      return mapTest(await prisma.test.update({ where: { id }, data: { name } }));
+      return mapTest(await prisma().test.update({ where: { id }, data: { name } }));
     } catch {
       return undefined;
     }
   }
   async updateTestSettings(id: string, settings: TestSettings): Promise<Test | undefined> {
     try {
-      const existing = await prisma.test.findUnique({ where: { id } });
+      const existing = await prisma().test.findUnique({ where: { id } });
       if (!existing) return undefined;
       const merged = { ...((existing.settings as object) || {}), ...settings };
       return mapTest(
-        await prisma.test.update({ where: { id }, data: { settings: merged } })
+        await prisma().test.update({ where: { id }, data: { settings: merged } })
       );
     } catch {
       return undefined;
@@ -195,7 +201,7 @@ export class PrismaStore {
   }
   async deleteTest(id: string): Promise<boolean> {
     try {
-      await prisma.test.delete({ where: { id } });
+      await prisma().test.delete({ where: { id } });
       return true;
     } catch {
       return false;
@@ -204,7 +210,7 @@ export class PrismaStore {
   async updateSteps(testId: string, steps: Step[]): Promise<Test | undefined> {
     try {
       return mapTest(
-        await prisma.test.update({ where: { id: testId }, data: { steps: steps as any } })
+        await prisma().test.update({ where: { id: testId }, data: { steps: steps as any } })
       );
     } catch {
       return undefined;
@@ -213,18 +219,13 @@ export class PrismaStore {
 
   async createRun(testId: string, environmentId: string): Promise<TestRun> {
     return mapRun(
-      await prisma.testRun.create({
-        data: {
-          testId,
-          environmentId,
-          status: "queued",
-          stepsResults: [],
-        },
+      await prisma().testRun.create({
+        data: { testId, environmentId, status: "queued", stepsResults: [] },
       })
     );
   }
   async getRun(id: string): Promise<TestRun | undefined> {
-    const r = await prisma.testRun.findUnique({ where: { id } });
+    const r = await prisma().testRun.findUnique({ where: { id } });
     return r ? mapRun(r) : undefined;
   }
   async updateRun(id: string, patch: Partial<TestRun>): Promise<TestRun | undefined> {
@@ -236,13 +237,13 @@ export class PrismaStore {
       if (patch.stepsResults !== undefined) data.stepsResults = patch.stepsResults;
       if (patch.artifacts !== undefined) data.artifacts = patch.artifacts;
       if (patch.error !== undefined) data.error = patch.error;
-      return mapRun(await prisma.testRun.update({ where: { id }, data }));
+      return mapRun(await prisma().testRun.update({ where: { id }, data }));
     } catch {
       return undefined;
     }
   }
   async listRuns(testId?: string): Promise<TestRun[]> {
-    const rows = await prisma.testRun.findMany({
+    const rows = await prisma().testRun.findMany({
       where: testId ? { testId } : undefined,
       orderBy: { createdAt: "desc" },
     });
@@ -251,20 +252,20 @@ export class PrismaStore {
 
   async createModule(projectId: string, name: string): Promise<Module> {
     return mapModule(
-      await prisma.module.create({ data: { projectId, name, steps: [] } })
+      await prisma().module.create({ data: { projectId, name, steps: [] } })
     );
   }
   async listModules(projectId: string): Promise<Module[]> {
-    return (await prisma.module.findMany({ where: { projectId } })).map(mapModule);
+    return (await prisma().module.findMany({ where: { projectId } })).map(mapModule);
   }
   async getModule(id: string): Promise<Module | undefined> {
-    const m = await prisma.module.findUnique({ where: { id } });
+    const m = await prisma().module.findUnique({ where: { id } });
     return m ? mapModule(m) : undefined;
   }
   async updateModuleSteps(id: string, steps: Step[]): Promise<Module | undefined> {
     try {
       return mapModule(
-        await prisma.module.update({ where: { id }, data: { steps: steps as any } })
+        await prisma().module.update({ where: { id }, data: { steps: steps as any } })
       );
     } catch {
       return undefined;
@@ -272,7 +273,7 @@ export class PrismaStore {
   }
   async deleteModule(id: string): Promise<boolean> {
     try {
-      await prisma.module.delete({ where: { id } });
+      await prisma().module.delete({ where: { id } });
       return true;
     } catch {
       return false;
@@ -290,7 +291,7 @@ export class PrismaStore {
   }): Promise<Schedule> {
     const interval = data.intervalMinutes || 60;
     return mapSchedule(
-      await prisma.schedule.create({
+      await prisma().schedule.create({
         data: {
           testId: data.testId,
           environmentId: data.environmentId,
@@ -305,13 +306,13 @@ export class PrismaStore {
     );
   }
   async listSchedules(testId?: string): Promise<Schedule[]> {
-    const rows = await prisma.schedule.findMany({
+    const rows = await prisma().schedule.findMany({
       where: testId ? { testId } : undefined,
     });
     return rows.map(mapSchedule);
   }
   async getSchedule(id: string): Promise<Schedule | undefined> {
-    const s = await prisma.schedule.findUnique({ where: { id } });
+    const s = await prisma().schedule.findUnique({ where: { id } });
     return s ? mapSchedule(s) : undefined;
   }
   async updateSchedule(id: string, patch: Partial<Schedule>): Promise<Schedule | undefined> {
@@ -322,21 +323,21 @@ export class PrismaStore {
       delete data.id;
       delete data.createdAt;
       delete data.updatedAt;
-      return mapSchedule(await prisma.schedule.update({ where: { id }, data }));
+      return mapSchedule(await prisma().schedule.update({ where: { id }, data }));
     } catch {
       return undefined;
     }
   }
   async deleteSchedule(id: string): Promise<boolean> {
     try {
-      await prisma.schedule.delete({ where: { id } });
+      await prisma().schedule.delete({ where: { id } });
       return true;
     } catch {
       return false;
     }
   }
   async dueSchedules(): Promise<Schedule[]> {
-    const rows = await prisma.schedule.findMany({
+    const rows = await prisma().schedule.findMany({
       where: { enabled: true, nextRunAt: { lte: new Date() } },
     });
     return rows.map(mapSchedule);
