@@ -18,6 +18,7 @@ export default function RootLayout({
   return (
     <html lang="en">
       <body>
+        <div className="mesh-grid" aria-hidden />
         <header className="header">
           <div className="header-inner">
             <a href="/" className="logo">
