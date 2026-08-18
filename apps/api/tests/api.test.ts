@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeAll } from "vitest";
+import { describe, it, expect } from "vitest";
 import request from "supertest";
 import express from "express";
 import cors from "cors";
@@ -9,9 +9,13 @@ import {
   CreateTestBody,
 } from "@flowguard/shared";
 import { store } from "../src/store.js";
-import { authMiddleware, registerUser, loginUser, AUTH_DISABLED } from "../src/auth.js";
+import {
+  authMiddleware,
+  registerUser,
+  loginUser,
+  AUTH_DISABLED,
+} from "../src/auth.js";
 
-// Minimal app mirror for isolated tests (no Playwright runs)
 function buildApp() {
   const app = express();
   app.use(cors());
@@ -106,9 +110,7 @@ describe("FlowGuard API", () => {
   });
 
   it("project → env → test → steps CRUD", async () => {
-    const p = await request(app)
-      .post("/api/projects")
-      .send({ name: "Demo" });
+    const p = await request(app).post("/api/projects").send({ name: "Demo" });
     expect(p.status).toBe(201);
 
     const env = await request(app)

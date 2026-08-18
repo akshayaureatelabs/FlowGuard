@@ -4,9 +4,13 @@ import type { Request, Response, NextFunction } from "express";
 import { v4 as uuid } from "uuid";
 
 const JWT_SECRET = process.env.JWT_SECRET || "dev-secret-change-me";
+
+// Local MVP default: auth off unless explicitly enabled with Postgres.
+// Auth is ON only when USE_DATABASE=true AND AUTH_DISABLED is not "true".
 const AUTH_DISABLED =
   process.env.AUTH_DISABLED === "true" ||
-  process.env.USE_DATABASE === "false";
+  process.env.USE_DATABASE !== "true" ||
+  process.env.AUTH_DISABLED === undefined && process.env.USE_DATABASE !== "true";
 
 export type AuthUser = {
   id: string;
@@ -14,7 +18,6 @@ export type AuthUser = {
   apiKey?: string;
 };
 
-// In-memory users when DB is off
 const memUsers = new Map<
   string,
   { id: string; email: string; passwordHash: string; apiKey: string; name?: string }
