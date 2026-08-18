@@ -14,7 +14,7 @@ import {
   CreateScheduleBody,
   UpdateTestSettingsBody,
 } from "@flowguard/shared";
-import { store } from "./store.js";
+import { repo } from "./repo.js";
 import { runLocalTest } from "./local-runner.js";
 import {
   authMiddleware,
@@ -27,23 +27,24 @@ import { trackRequest, trackRunStarted, getMetrics } from "./metrics.js";
 
 const app = express();
 const PORT = Number(process.env.PORT) || 3001;
-const startedAt = Date.now();
 
 app.use(helmet({ contentSecurityPolicy: false }));
 app.use(cors());
 app.use(express.json({ limit: "2mb" }));
-app.use((req, _res, next) => {
+app.use((_req, _res, next) => {
   trackRequest();
   next();
 });
 
-const limiter = rateLimit({
-  windowMs: 60_000,
-  max: Number(process.env.RATE_LIMIT_MAX) || 300,
-  standardHeaders: true,
-  legacyHeaders: false,
-});
-app.use("/api", limiter);
+app.use(
+  "/api",
+  rateLimit({
+    windowMs: 60_000,
+    max: Number(process.env.RATE_LIMIT_MAX) || 300,
+    standardHeaders: true,
+    legacyHeaders: false,
+  })
+);
 
 app.get("/health", (_req, res) => {
   const m = getMetrics();
@@ -57,22 +58,16 @@ app.get("/health", (_req, res) => {
   });
 });
 
-app.get("/metrics", (_req, res) => {
-  res.json(getMetrics());
-});
-
+app.get("/metrics", (_req, res) => res.json(getMetrics()));
 app.use("/docs", swaggerUi.serve, swaggerUi.setup(openApiSpec));
 app.get("/openapi.json", (_req, res) => res.json(openApiSpec));
 
-// ── Auth ────────────────────────────────────────────────────────────────────
 app.post("/api/auth/register", async (req, res) => {
   try {
     const { email, password, name } = req.body || {};
-    if (!email || !password) {
+    if (!email || !password)
       return res.status(400).json({ error: "email and password required" });
-    }
-    const user = await registerUser(email, password, name);
-    res.status(201).json(user);
+    res.status(201).json(await registerUser(email, password, name));
   } catch (e: any) {
     res.status(400).json({ error: e.message });
   }
@@ -81,11 +76,9 @@ app.post("/api/auth/register", async (req, res) => {
 app.post("/api/auth/login", async (req, res) => {
   try {
     const { email, password } = req.body || {};
-    if (!email || !password) {
+    if (!email || !password)
       return res.status(400).json({ error: "email and password required" });
-    }
-    const result = await loginUser(email, password);
-    res.json(result);
+    res.json(await loginUser(email, password));
   } catch (e: any) {
     res.status(401).json({ error: e.message });
   }
@@ -95,50 +88,49 @@ app.get("/api/auth/me", authMiddleware, (req, res) => {
   res.json({ user: req.user });
 });
 
-// Protect API routes (auth disabled automatically in local memory mode)
 app.use("/api", authMiddleware);
 
-app.get("/api/projects", (_req, res) => {
-  res.json(store.listProjects());
+app.get("/api/projects", async (_req, res) => {
+  res.json(await repo.listProjects());
 });
 
-app.post("/api/projects", (req, res) => {
+app.post("/api/projects", async (req, res) => {
   const parsed = CreateProjectBody.safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ error: parsed.error.flatten() });
-  res.status(201).json(store.createProject(parsed.data.name));
+  res.status(201).json(await repo.createProject(parsed.data.name));
 });
 
-app.get("/api/projects/:id", (req, res) => {
-  const project = store.getProject(req.params.id);
+app.get("/api/projects/:id", async (req, res) => {
+  const project = await repo.getProject(req.params.id);
   if (!project) return res.status(404).json({ error: "Project not found" });
   res.json(project);
 });
 
-app.put("/api/projects/:id", (req, res) => {
+app.put("/api/projects/:id", async (req, res) => {
   const parsed = CreateProjectBody.safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ error: parsed.error.flatten() });
-  const project = store.updateProject(req.params.id, parsed.data.name);
+  const project = await repo.updateProject(req.params.id, parsed.data.name);
   if (!project) return res.status(404).json({ error: "Project not found" });
   res.json(project);
 });
 
-app.delete("/api/projects/:id", (req, res) => {
-  if (!store.deleteProject(req.params.id))
+app.delete("/api/projects/:id", async (req, res) => {
+  if (!(await repo.deleteProject(req.params.id)))
     return res.status(404).json({ error: "Project not found" });
   res.status(204).send();
 });
 
-app.get("/api/projects/:projectId/environments", (req, res) => {
-  res.json(store.listEnvironments(req.params.projectId));
+app.get("/api/projects/:projectId/environments", async (req, res) => {
+  res.json(await repo.listEnvironments(req.params.projectId));
 });
 
-app.post("/api/projects/:projectId/environments", (req, res) => {
-  if (!store.getProject(req.params.projectId))
+app.post("/api/projects/:projectId/environments", async (req, res) => {
+  if (!(await repo.getProject(req.params.projectId)))
     return res.status(404).json({ error: "Project not found" });
   const parsed = CreateEnvironmentBody.safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ error: parsed.error.flatten() });
   res.status(201).json(
-    store.createEnvironment(
+    await repo.createEnvironment(
       req.params.projectId,
       parsed.data.name,
       parsed.data.baseUrl,
@@ -147,8 +139,8 @@ app.post("/api/projects/:projectId/environments", (req, res) => {
   );
 });
 
-app.put("/api/environments/:id", (req, res) => {
-  const env = store.updateEnvironment(req.params.id, {
+app.put("/api/environments/:id", async (req, res) => {
+  const env = await repo.updateEnvironment(req.params.id, {
     name: req.body?.name,
     baseUrl: req.body?.baseUrl,
     variables: req.body?.variables,
@@ -157,70 +149,70 @@ app.put("/api/environments/:id", (req, res) => {
   res.json(env);
 });
 
-app.delete("/api/environments/:id", (req, res) => {
-  if (!store.deleteEnvironment(req.params.id))
+app.delete("/api/environments/:id", async (req, res) => {
+  if (!(await repo.deleteEnvironment(req.params.id)))
     return res.status(404).json({ error: "Environment not found" });
   res.status(204).send();
 });
 
-app.get("/api/projects/:projectId/tests", (req, res) => {
-  res.json(store.listTests(req.params.projectId));
+app.get("/api/projects/:projectId/tests", async (req, res) => {
+  res.json(await repo.listTests(req.params.projectId));
 });
 
-app.post("/api/projects/:projectId/tests", (req, res) => {
-  if (!store.getProject(req.params.projectId))
+app.post("/api/projects/:projectId/tests", async (req, res) => {
+  if (!(await repo.getProject(req.params.projectId)))
     return res.status(404).json({ error: "Project not found" });
   const parsed = CreateTestBody.safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ error: parsed.error.flatten() });
-  res.status(201).json(store.createTest(req.params.projectId, parsed.data.name));
+  res.status(201).json(await repo.createTest(req.params.projectId, parsed.data.name));
 });
 
-app.get("/api/tests/:id", (req, res) => {
-  const test = store.getTest(req.params.id);
+app.get("/api/tests/:id", async (req, res) => {
+  const test = await repo.getTest(req.params.id);
   if (!test) return res.status(404).json({ error: "Test not found" });
   res.json(test);
 });
 
-app.put("/api/tests/:id", (req, res) => {
+app.put("/api/tests/:id", async (req, res) => {
   const parsed = CreateTestBody.safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ error: parsed.error.flatten() });
-  const test = store.updateTest(req.params.id, parsed.data.name);
+  const test = await repo.updateTest(req.params.id, parsed.data.name);
   if (!test) return res.status(404).json({ error: "Test not found" });
   res.json(test);
 });
 
-app.put("/api/tests/:id/settings", (req, res) => {
+app.put("/api/tests/:id/settings", async (req, res) => {
   const parsed = UpdateTestSettingsBody.safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ error: parsed.error.flatten() });
-  const test = store.updateTestSettings(req.params.id, parsed.data);
+  const test = await repo.updateTestSettings(req.params.id, parsed.data);
   if (!test) return res.status(404).json({ error: "Test not found" });
   res.json(test);
 });
 
-app.delete("/api/tests/:id", (req, res) => {
-  if (!store.deleteTest(req.params.id))
+app.delete("/api/tests/:id", async (req, res) => {
+  if (!(await repo.deleteTest(req.params.id)))
     return res.status(404).json({ error: "Test not found" });
   res.status(204).send();
 });
 
-app.put("/api/tests/:id/steps", (req, res) => {
+app.put("/api/tests/:id/steps", async (req, res) => {
   const parsed = UpdateStepsBody.safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ error: parsed.error.flatten() });
   const steps = parsed.data.steps.map((s) => ({ ...s, id: s.id || uuid() }));
-  const test = store.updateSteps(req.params.id, steps);
+  const test = await repo.updateSteps(req.params.id, steps);
   if (!test) return res.status(404).json({ error: "Test not found" });
   res.json(test);
 });
 
 app.post("/api/tests/:id/runs", async (req, res) => {
-  const test = store.getTest(req.params.id);
+  const test = await repo.getTest(req.params.id);
   if (!test) return res.status(404).json({ error: "Test not found" });
   const parsed = CreateRunBody.safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ error: parsed.error.flatten() });
-  const env = store.getEnvironment(parsed.data.environmentId);
+  const env = await repo.getEnvironment(parsed.data.environmentId);
   if (!env) return res.status(404).json({ error: "Environment not found" });
 
-  const run = store.createRun(test.id, env.id);
+  const run = await repo.createRun(test.id, env.id);
   trackRunStarted();
 
   const useLocal =
@@ -228,9 +220,9 @@ app.post("/api/tests/:id/runs", async (req, res) => {
     process.env.USE_LOCAL_EXECUTION === undefined;
 
   if (useLocal) {
-    runLocalTest(run.id, test, env).catch((err) => {
+    runLocalTest(run.id, test, env).catch(async (err) => {
       console.error("Local run failed:", err);
-      store.updateRun(run.id, {
+      await repo.updateRun(run.id, {
         status: "error",
         error: String(err),
         finishedAt: new Date().toISOString(),
@@ -240,98 +232,101 @@ app.post("/api/tests/:id/runs", async (req, res) => {
   res.status(201).json(run);
 });
 
-app.get("/api/runs/:id", (req, res) => {
-  const run = store.getRun(req.params.id);
+app.get("/api/runs/:id", async (req, res) => {
+  const run = await repo.getRun(req.params.id);
   if (!run) return res.status(404).json({ error: "Run not found" });
   res.json(run);
 });
 
-app.get("/api/tests/:id/runs", (req, res) => {
-  res.json(store.listRuns(req.params.id));
+app.get("/api/tests/:id/runs", async (req, res) => {
+  res.json(await repo.listRuns(req.params.id));
 });
 
-app.get("/api/projects/:projectId/modules", (req, res) => {
-  res.json(store.listModules(req.params.projectId));
+app.get("/api/projects/:projectId/modules", async (req, res) => {
+  res.json(await repo.listModules(req.params.projectId));
 });
 
-app.post("/api/projects/:projectId/modules", (req, res) => {
-  if (!store.getProject(req.params.projectId))
+app.post("/api/projects/:projectId/modules", async (req, res) => {
+  if (!(await repo.getProject(req.params.projectId)))
     return res.status(404).json({ error: "Project not found" });
   const parsed = CreateModuleBody.safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ error: parsed.error.flatten() });
-  res.status(201).json(store.createModule(req.params.projectId, parsed.data.name));
+  res.status(201).json(await repo.createModule(req.params.projectId, parsed.data.name));
 });
 
-app.get("/api/modules/:id", (req, res) => {
-  const mod = store.getModule(req.params.id);
+app.get("/api/modules/:id", async (req, res) => {
+  const mod = await repo.getModule(req.params.id);
   if (!mod) return res.status(404).json({ error: "Module not found" });
   res.json(mod);
 });
 
-app.put("/api/modules/:id/steps", (req, res) => {
+app.put("/api/modules/:id/steps", async (req, res) => {
   const parsed = UpdateStepsBody.safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ error: parsed.error.flatten() });
   const steps = parsed.data.steps.map((s) => ({ ...s, id: s.id || uuid() }));
-  const mod = store.updateModuleSteps(req.params.id, steps);
+  const mod = await repo.updateModuleSteps(req.params.id, steps);
   if (!mod) return res.status(404).json({ error: "Module not found" });
   res.json(mod);
 });
 
-app.delete("/api/modules/:id", (req, res) => {
-  if (!store.deleteModule(req.params.id))
+app.delete("/api/modules/:id", async (req, res) => {
+  if (!(await repo.deleteModule(req.params.id)))
     return res.status(404).json({ error: "Module not found" });
   res.status(204).send();
 });
 
-app.get("/api/schedules", (req, res) => {
-  const testId = req.query.testId as string | undefined;
-  res.json(store.listSchedules(testId));
+app.get("/api/schedules", async (req, res) => {
+  res.json(await repo.listSchedules(req.query.testId as string | undefined));
 });
 
-app.post("/api/schedules", (req, res) => {
+app.post("/api/schedules", async (req, res) => {
   const parsed = CreateScheduleBody.safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ error: parsed.error.flatten() });
-  if (!store.getTest(parsed.data.testId))
+  if (!(await repo.getTest(parsed.data.testId)))
     return res.status(404).json({ error: "Test not found" });
-  if (!store.getEnvironment(parsed.data.environmentId))
+  if (!(await repo.getEnvironment(parsed.data.environmentId)))
     return res.status(404).json({ error: "Environment not found" });
-  res.status(201).json(store.createSchedule(parsed.data));
+  res.status(201).json(await repo.createSchedule(parsed.data));
 });
 
-app.put("/api/schedules/:id", (req, res) => {
-  const sch = store.updateSchedule(req.params.id, req.body || {});
+app.put("/api/schedules/:id", async (req, res) => {
+  const sch = await repo.updateSchedule(req.params.id, req.body || {});
   if (!sch) return res.status(404).json({ error: "Schedule not found" });
   res.json(sch);
 });
 
-app.delete("/api/schedules/:id", (req, res) => {
-  if (!store.deleteSchedule(req.params.id))
+app.delete("/api/schedules/:id", async (req, res) => {
+  if (!(await repo.deleteSchedule(req.params.id)))
     return res.status(404).json({ error: "Schedule not found" });
   res.status(204).send();
 });
 
-setInterval(() => {
-  const due = store.dueSchedules();
-  for (const sch of due) {
-    const test = store.getTest(sch.testId);
-    const env = store.getEnvironment(sch.environmentId);
-    if (!test || !env) continue;
-    const run = store.createRun(test.id, env.id);
-    trackRunStarted();
-    const interval = sch.intervalMinutes || 60;
-    store.updateSchedule(sch.id, {
-      lastRunAt: new Date().toISOString(),
-      nextRunAt: new Date(Date.now() + interval * 60_000).toISOString(),
-    });
-    runLocalTest(run.id, test, env).catch((err) => {
-      console.error("Scheduled run failed:", err);
-      store.updateRun(run.id, {
-        status: "error",
-        error: String(err),
-        finishedAt: new Date().toISOString(),
+setInterval(async () => {
+  try {
+    const due = await repo.dueSchedules();
+    for (const sch of due) {
+      const test = await repo.getTest(sch.testId);
+      const env = await repo.getEnvironment(sch.environmentId);
+      if (!test || !env) continue;
+      const run = await repo.createRun(test.id, env.id);
+      trackRunStarted();
+      const interval = sch.intervalMinutes || 60;
+      await repo.updateSchedule(sch.id, {
+        lastRunAt: new Date().toISOString(),
+        nextRunAt: new Date(Date.now() + interval * 60_000).toISOString(),
       });
-    });
-    console.log(`[scheduler] triggered schedule ${sch.id} → run ${run.id}`);
+      runLocalTest(run.id, test, env).catch(async (err) => {
+        console.error("Scheduled run failed:", err);
+        await repo.updateRun(run.id, {
+          status: "error",
+          error: String(err),
+          finishedAt: new Date().toISOString(),
+        });
+      });
+      console.log(`[scheduler] triggered schedule ${sch.id} → run ${run.id}`);
+    }
+  } catch (err) {
+    console.error("[scheduler] tick error", err);
   }
 }, 30_000);
 
