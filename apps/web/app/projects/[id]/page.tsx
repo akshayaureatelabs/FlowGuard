@@ -15,9 +15,15 @@ export default function ProjectPage() {
   const [envUrl, setEnvUrl] = useState("https://example.com");
   const [testName, setTestName] = useState("");
   const [error, setError] = useState("");
+  const [editingEnvId, setEditingEnvId] = useState<string | null>(null);
+  const [editEnvName, setEditEnvName] = useState("");
+  const [editEnvUrl, setEditEnvUrl] = useState("");
+  const [editingTestId, setEditingTestId] = useState<string | null>(null);
+  const [editTestName, setEditTestName] = useState("");
 
   const load = async () => {
     try {
+      setError("");
       const [p, e, t] = await Promise.all([
         api.getProject(projectId),
         api.listEnvironments(projectId),
@@ -38,6 +44,7 @@ export default function ProjectPage() {
   const createEnv = async () => {
     if (!envName.trim() || !envUrl.trim()) return;
     try {
+      setError("");
       await api.createEnvironment(projectId, {
         name: envName.trim(),
         baseUrl: envUrl.trim(),
@@ -49,9 +56,36 @@ export default function ProjectPage() {
     }
   };
 
+  const saveEnv = async () => {
+    if (!editingEnvId || !editEnvName.trim() || !editEnvUrl.trim()) return;
+    try {
+      setError("");
+      await api.updateEnvironment(editingEnvId, {
+        name: editEnvName.trim(),
+        baseUrl: editEnvUrl.trim(),
+      });
+      setEditingEnvId(null);
+      await load();
+    } catch (err: any) {
+      setError(err.message);
+    }
+  };
+
+  const deleteEnv = async (id: string, name: string) => {
+    if (!confirm(`Delete environment "${name}"?`)) return;
+    try {
+      setError("");
+      await api.deleteEnvironment(id);
+      await load();
+    } catch (err: any) {
+      setError(err.message);
+    }
+  };
+
   const createTest = async () => {
     if (!testName.trim()) return;
     try {
+      setError("");
       const t = await api.createTest(projectId, testName.trim());
       setTestName("");
       window.location.href = `/tests/${t.id}`;
@@ -60,12 +94,37 @@ export default function ProjectPage() {
     }
   };
 
+  const saveTest = async () => {
+    if (!editingTestId || !editTestName.trim()) return;
+    try {
+      setError("");
+      await api.updateTest(editingTestId, editTestName.trim());
+      setEditingTestId(null);
+      await load();
+    } catch (err: any) {
+      setError(err.message);
+    }
+  };
+
+  const deleteTest = async (id: string, name: string) => {
+    if (!confirm(`Delete test "${name}"? This removes all its runs too.`)) return;
+    try {
+      setError("");
+      await api.deleteTest(id);
+      await load();
+    } catch (err: any) {
+      setError(err.message);
+    }
+  };
+
   if (!project && !error) return <p className="muted">Loading…</p>;
-  if (error) return <p style={{ color: "var(--danger)" }}>{error}</p>;
+  if (error && !project)
+    return <p style={{ color: "var(--danger)" }}>{error}</p>;
 
   return (
     <div>
       <h1>{project?.name}</h1>
+      {error && <p style={{ color: "var(--danger)" }}>{error}</p>}
 
       <h2>Environments</h2>
       <div className="form-row">
@@ -98,9 +157,67 @@ export default function ProjectPage() {
         <div className="empty">No environments yet.</div>
       )}
       {envs.map((e) => (
-        <div key={e.id} className="card">
-          <strong>{e.name}</strong>
-          <div className="muted">{e.baseUrl}</div>
+        <div
+          key={e.id}
+          className="card"
+          style={{
+            display: "flex",
+            justifyContent: "space-between",
+            alignItems: "center",
+            gap: "1rem",
+            flexWrap: "wrap",
+          }}
+        >
+          {editingEnvId === e.id ? (
+            <div className="form-row" style={{ marginBottom: 0, flex: 1 }}>
+              <input
+                value={editEnvName}
+                onChange={(ev) => setEditEnvName(ev.target.value)}
+                placeholder="Name"
+              />
+              <input
+                value={editEnvUrl}
+                onChange={(ev) => setEditEnvUrl(ev.target.value)}
+                placeholder="Base URL"
+                style={{ minWidth: 220 }}
+              />
+              <button className="btn btn-sm" onClick={saveEnv}>
+                Save
+              </button>
+              <button
+                className="btn btn-ghost btn-sm"
+                onClick={() => setEditingEnvId(null)}
+              >
+                Cancel
+              </button>
+            </div>
+          ) : (
+            <>
+              <div>
+                <strong>{e.name}</strong>
+                <div className="muted">{e.baseUrl}</div>
+              </div>
+              <div style={{ display: "flex", gap: 8 }}>
+                <button
+                  className="btn btn-ghost btn-sm"
+                  onClick={() => {
+                    setEditingEnvId(e.id);
+                    setEditEnvName(e.name);
+                    setEditEnvUrl(e.baseUrl);
+                  }}
+                >
+                  Edit
+                </button>
+                <button
+                  className="btn btn-ghost btn-sm"
+                  style={{ color: "var(--danger)" }}
+                  onClick={() => deleteEnv(e.id, e.name)}
+                >
+                  Delete
+                </button>
+              </div>
+            </>
+          )}
         </div>
       ))}
 
@@ -125,12 +242,67 @@ export default function ProjectPage() {
 
       {tests.length === 0 && <div className="empty">No tests yet.</div>}
       {tests.map((t) => (
-        <div key={t.id} className="card">
-          <a href={`/tests/${t.id}`}>{t.name}</a>
-          <div className="muted">
-            {t.steps?.length || 0} steps ·{" "}
-            {new Date(t.updatedAt).toLocaleString()}
-          </div>
+        <div
+          key={t.id}
+          className="card"
+          style={{
+            display: "flex",
+            justifyContent: "space-between",
+            alignItems: "center",
+            gap: "1rem",
+            flexWrap: "wrap",
+          }}
+        >
+          {editingTestId === t.id ? (
+            <div className="form-row" style={{ marginBottom: 0, flex: 1 }}>
+              <input
+                value={editTestName}
+                onChange={(ev) => setEditTestName(ev.target.value)}
+                onKeyDown={(ev) => {
+                  if (ev.key === "Enter") saveTest();
+                  if (ev.key === "Escape") setEditingTestId(null);
+                }}
+                autoFocus
+              />
+              <button className="btn btn-sm" onClick={saveTest}>
+                Save
+              </button>
+              <button
+                className="btn btn-ghost btn-sm"
+                onClick={() => setEditingTestId(null)}
+              >
+                Cancel
+              </button>
+            </div>
+          ) : (
+            <>
+              <div>
+                <a href={`/tests/${t.id}`}>{t.name}</a>
+                <div className="muted">
+                  {t.steps?.length || 0} steps ·{" "}
+                  {new Date(t.updatedAt).toLocaleString()}
+                </div>
+              </div>
+              <div style={{ display: "flex", gap: 8 }}>
+                <button
+                  className="btn btn-ghost btn-sm"
+                  onClick={() => {
+                    setEditingTestId(t.id);
+                    setEditTestName(t.name);
+                  }}
+                >
+                  Edit
+                </button>
+                <button
+                  className="btn btn-ghost btn-sm"
+                  style={{ color: "var(--danger)" }}
+                  onClick={() => deleteTest(t.id, t.name)}
+                >
+                  Delete
+                </button>
+              </div>
+            </>
+          )}
         </div>
       ))}
     </div>
