@@ -21,6 +21,7 @@ app.get("/health", (_req, res) => {
   res.json({ status: "ok", time: new Date().toISOString() });
 });
 
+// ── Projects ────────────────────────────────────────────────────────────────
 app.get("/api/projects", (_req, res) => {
   res.json(store.listProjects());
 });
@@ -40,6 +41,23 @@ app.get("/api/projects/:id", (req, res) => {
   res.json(project);
 });
 
+app.put("/api/projects/:id", (req, res) => {
+  const parsed = CreateProjectBody.safeParse(req.body);
+  if (!parsed.success) {
+    return res.status(400).json({ error: parsed.error.flatten() });
+  }
+  const project = store.updateProject(req.params.id, parsed.data.name);
+  if (!project) return res.status(404).json({ error: "Project not found" });
+  res.json(project);
+});
+
+app.delete("/api/projects/:id", (req, res) => {
+  const ok = store.deleteProject(req.params.id);
+  if (!ok) return res.status(404).json({ error: "Project not found" });
+  res.status(204).send();
+});
+
+// ── Environments ────────────────────────────────────────────────────────────
 app.get("/api/projects/:projectId/environments", (req, res) => {
   res.json(store.listEnvironments(req.params.projectId));
 });
@@ -61,6 +79,23 @@ app.post("/api/projects/:projectId/environments", (req, res) => {
   res.status(201).json(env);
 });
 
+app.put("/api/environments/:id", (req, res) => {
+  const env = store.updateEnvironment(req.params.id, {
+    name: req.body?.name,
+    baseUrl: req.body?.baseUrl,
+    variables: req.body?.variables,
+  });
+  if (!env) return res.status(404).json({ error: "Environment not found" });
+  res.json(env);
+});
+
+app.delete("/api/environments/:id", (req, res) => {
+  const ok = store.deleteEnvironment(req.params.id);
+  if (!ok) return res.status(404).json({ error: "Environment not found" });
+  res.status(204).send();
+});
+
+// ── Tests ───────────────────────────────────────────────────────────────────
 app.get("/api/projects/:projectId/tests", (req, res) => {
   res.json(store.listTests(req.params.projectId));
 });
@@ -83,6 +118,22 @@ app.get("/api/tests/:id", (req, res) => {
   res.json(test);
 });
 
+app.put("/api/tests/:id", (req, res) => {
+  const parsed = CreateTestBody.safeParse(req.body);
+  if (!parsed.success) {
+    return res.status(400).json({ error: parsed.error.flatten() });
+  }
+  const test = store.updateTest(req.params.id, parsed.data.name);
+  if (!test) return res.status(404).json({ error: "Test not found" });
+  res.json(test);
+});
+
+app.delete("/api/tests/:id", (req, res) => {
+  const ok = store.deleteTest(req.params.id);
+  if (!ok) return res.status(404).json({ error: "Test not found" });
+  res.status(204).send();
+});
+
 app.put("/api/tests/:id/steps", (req, res) => {
   const parsed = UpdateStepsBody.safeParse(req.body);
   if (!parsed.success) {
@@ -97,6 +148,7 @@ app.put("/api/tests/:id/steps", (req, res) => {
   res.json(test);
 });
 
+// ── Runs ────────────────────────────────────────────────────────────────────
 app.post("/api/tests/:id/runs", async (req, res) => {
   const test = store.getTest(req.params.id);
   if (!test) return res.status(404).json({ error: "Test not found" });
