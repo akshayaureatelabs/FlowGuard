@@ -1,0 +1,22 @@
+{
+  "manifest_version": 3,
+  "name": "FlowGuard Recorder",
+  "version": "0.1.0",
+  "description": "Record browser actions and export FlowGuard test steps",
+  "permissions": ["activeTab", "scripting", "storage"],
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "FlowGuard Recorder"
+  },
+  "background": {
+    "service_worker": "background.js"
+  },
+  "content_scripts": [
+    {
+      "matches": ["<all_urls>"],
+      "js": ["content.js"],
+      "run_at": "document_idle"
+    }
+  ],
+  "icons": {}
+}

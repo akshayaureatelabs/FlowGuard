@@ -18,15 +18,26 @@ export default function TestEditorPage() {
   const [run, setRun] = useState<any>(null);
   const [error, setError] = useState("");
   const [msg, setMsg] = useState("");
+  const [browser, setBrowser] = useState("chrome");
+  const [vw, setVw] = useState(1280);
+  const [vh, setVh] = useState(720);
+  const [schedules, setSchedules] = useState<any[]>([]);
+  const [intervalMin, setIntervalMin] = useState(60);
+  const [notifyEmail, setNotifyEmail] = useState("");
 
   const load = useCallback(async () => {
     try {
       const t = await api.getTest(testId);
       setTest(t);
       setSteps(t.steps || []);
+      setBrowser(t.settings?.browser || "chrome");
+      setVw(t.settings?.viewport?.width || 1280);
+      setVh(t.settings?.viewport?.height || 720);
       const projectEnvs = await api.listEnvironments(t.projectId);
       setEnvs(projectEnvs);
       if (projectEnvs.length && !envId) setEnvId(projectEnvs[0].id);
+      const sch = await api.listSchedules(testId);
+      setSchedules(sch);
     } catch (err: any) {
       setError(err.message);
     }
@@ -39,10 +50,15 @@ export default function TestEditorPage() {
   const save = async () => {
     setSaving(true);
     setMsg("");
+    setError("");
     try {
+      await api.updateTestSettings(testId, {
+        browser,
+        viewport: { width: vw, height: vh },
+      });
       const updated = await api.updateSteps(testId, steps);
       setTest(updated);
-      setMsg("Steps saved");
+      setMsg("Saved steps + settings");
     } catch (err: any) {
       setError(err.message);
     } finally {
@@ -59,6 +75,10 @@ export default function TestEditorPage() {
     setError("");
     setRun(null);
     try {
+      await api.updateTestSettings(testId, {
+        browser,
+        viewport: { width: vw, height: vh },
+      });
       await api.updateSteps(testId, steps);
       const r = await api.createRun(testId, envId);
       setRun(r);
@@ -67,9 +87,7 @@ export default function TestEditorPage() {
         setRun(latest);
         if (latest.status === "queued" || latest.status === "running") {
           setTimeout(poll, 1000);
-        } else {
-          setRunning(false);
-        }
+        } else setRunning(false);
       };
       setTimeout(poll, 800);
     } catch (err: any) {
@@ -78,27 +96,61 @@ export default function TestEditorPage() {
     }
   };
 
+  const addSchedule = async () => {
+    if (!envId) {
+      setError("Select an environment for the schedule");
+      return;
+    }
+    try {
+      setError("");
+      await api.createSchedule({
+        testId,
+        environmentId: envId,
+        intervalMinutes: intervalMin,
+        notifyEmail: notifyEmail || undefined,
+      });
+      setMsg(`Schedule every ${intervalMin} min created`);
+      await load();
+    } catch (err: any) {
+      setError(err.message);
+    }
+  };
+
+  const toggleSchedule = async (id: string, enabled: boolean) => {
+    try {
+      await api.updateSchedule(id, { enabled: !enabled });
+      await load();
+    } catch (err: any) {
+      setError(err.message);
+    }
+  };
+
+  const removeSchedule = async (id: string) => {
+    if (!confirm("Delete this schedule?")) return;
+    try {
+      await api.deleteSchedule(id);
+      await load();
+    } catch (err: any) {
+      setError(err.message);
+    }
+  };
+
   if (!test && !error) return <p className="muted">Loading…</p>;
-  if (error && !test)
-    return <p style={{ color: "var(--danger)" }}>{error}</p>;
+  if (error && !test) return <div className="alert-error">{error}</div>;
 
   return (
     <div>
-      <div
-        style={{
-          display: "flex",
-          justifyContent: "space-between",
-          alignItems: "center",
-          flexWrap: "wrap",
-          gap: "0.75rem",
-        }}
-      >
-        <div>
-          <h1 style={{ marginBottom: 4 }}>{test?.name}</h1>
-          <a href={`/projects/${test?.projectId}`} className="muted">
+      <div className="page-header">
+        <p className="muted" style={{ marginBottom: 6 }}>
+          <a href={`/projects/${test?.projectId}`} style={{ color: "var(--muted)", textDecoration: "none" }}>
             ← Back to project
           </a>
-        </div>
+        </p>
+        <h1>{test?.name}</h1>
+        <p>Codeless editor · settings · schedule · run</p>
+      </div>
+
+      <div className="panel-box">
         <div className="form-row" style={{ marginBottom: 0 }}>
           <div className="field">
             <label>Environment</label>
@@ -111,34 +163,108 @@ export default function TestEditorPage() {
               ))}
             </select>
           </div>
-          <div className="field" style={{ justifyContent: "flex-end" }}>
+          <div className="field">
+            <label>Browser</label>
+            <select value={browser} onChange={(e) => setBrowser(e.target.value)}>
+              <option value="chrome">Chrome</option>
+              <option value="firefox">Firefox</option>
+            </select>
+          </div>
+          <div className="field">
+            <label>Viewport W</label>
+            <input type="number" value={vw} onChange={(e) => setVw(Number(e.target.value))} style={{ minWidth: 90 }} />
+          </div>
+          <div className="field">
+            <label>Viewport H</label>
+            <input type="number" value={vh} onChange={(e) => setVh(Number(e.target.value))} style={{ minWidth: 90 }} />
+          </div>
+          <div className="field">
             <label>&nbsp;</label>
             <div style={{ display: "flex", gap: 8 }}>
               <button className="btn btn-ghost" onClick={save} disabled={saving}>
                 {saving ? "Saving…" : "Save"}
               </button>
-              <button
-                className="btn"
-                onClick={startRun}
-                disabled={running || !envId}
-              >
-                {running ? "Running…" : "Run Test"}
+              <button className="btn" onClick={startRun} disabled={running || !envId}>
+                {running ? "Running…" : "Run test"}
               </button>
             </div>
           </div>
         </div>
       </div>
 
-      {msg && <p style={{ color: "var(--success)", marginTop: 8 }}>{msg}</p>}
-      {error && (
-        <p style={{ color: "var(--danger)", marginTop: 8 }}>{error}</p>
-      )}
+      {msg && <div className="alert-success">{msg}</div>}
+      {error && <div className="alert-error">{error}</div>}
 
       <h2>Steps</h2>
       <StepEditor steps={steps} onChange={setSteps} />
 
+      <h2>Schedule</h2>
+      <div className="panel-box">
+        <div className="form-row" style={{ marginBottom: 0 }}>
+          <div className="field">
+            <label>Every (minutes)</label>
+            <input
+              type="number"
+              min={1}
+              value={intervalMin}
+              onChange={(e) => setIntervalMin(Number(e.target.value))}
+            />
+          </div>
+          <div className="field" style={{ flex: 1 }}>
+            <label>Notify email (optional)</label>
+            <input
+              value={notifyEmail}
+              onChange={(e) => setNotifyEmail(e.target.value)}
+              placeholder="qa@company.com"
+              style={{ width: "100%", minWidth: 0 }}
+            />
+          </div>
+          <div className="field">
+            <label>&nbsp;</label>
+            <button className="btn" onClick={addSchedule}>
+              Add schedule
+            </button>
+          </div>
+        </div>
+        <p className="muted" style={{ marginTop: 10 }}>
+          Scheduler checks every 30s. Uses the selected environment above.
+        </p>
+      </div>
+
+      {schedules.length === 0 && (
+        <div className="empty">No schedules yet.</div>
+      )}
+      {schedules.map((s) => (
+        <div
+          key={s.id}
+          className="card"
+          style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, flexWrap: "wrap" }}
+        >
+          <div>
+            <strong>Every {s.intervalMinutes} min</strong>
+            <div className="muted">
+              {s.enabled ? "Enabled" : "Paused"}
+              {s.nextRunAt && ` · next ${new Date(s.nextRunAt).toLocaleString()}`}
+              {s.notifyEmail && ` · ${s.notifyEmail}`}
+            </div>
+          </div>
+          <div style={{ display: "flex", gap: 8 }}>
+            <button className="btn btn-ghost btn-sm" onClick={() => toggleSchedule(s.id, s.enabled)}>
+              {s.enabled ? "Pause" : "Resume"}
+            </button>
+            <button
+              className="btn btn-ghost btn-sm"
+              style={{ color: "var(--danger)" }}
+              onClick={() => removeSchedule(s.id)}
+            >
+              Delete
+            </button>
+          </div>
+        </div>
+      ))}
+
       {run && (
-        <div style={{ marginTop: "2rem" }}>
+        <div style={{ marginTop: "1.5rem" }}>
           <h2>
             Run result{" "}
             <span
@@ -153,13 +279,11 @@ export default function TestEditorPage() {
               {run.status}
             </span>
           </h2>
-          {run.error && (
-            <p style={{ color: "var(--danger)" }}>{run.error}</p>
-          )}
+          {run.error && <div className="alert-error">{run.error}</div>}
           {run.stepsResults?.length > 0 && (
             <div className="step-list" style={{ marginTop: 12 }}>
-              {run.stepsResults.map((r: any) => (
-                <div key={r.stepId} className="step-item">
+              {run.stepsResults.map((r: any, i: number) => (
+                <div key={`${r.stepId}-${i}`} className="step-item">
                   <span
                     className={`badge ${
                       r.status === "passed"
