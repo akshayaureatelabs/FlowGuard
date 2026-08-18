@@ -119,42 +119,53 @@ export default function ProjectPage() {
 
   if (!project && !error) return <p className="muted">Loading…</p>;
   if (error && !project)
-    return <p style={{ color: "var(--danger)" }}>{error}</p>;
+    return <div className="alert-error">{error}</div>;
 
   return (
     <div>
-      <h1>{project?.name}</h1>
-      {error && <p style={{ color: "var(--danger)" }}>{error}</p>}
+      <div className="page-header">
+        <p className="muted" style={{ marginBottom: 6 }}>
+          <a href="/" style={{ color: "var(--muted)", textDecoration: "none" }}>
+            ← Projects
+          </a>
+        </p>
+        <h1>{project?.name}</h1>
+        <p>Environments and tests for this project.</p>
+      </div>
+
+      {error && <div className="alert-error">{error}</div>}
 
       <h2>Environments</h2>
-      <div className="form-row">
-        <div className="field">
-          <label>Name</label>
-          <input
-            value={envName}
-            onChange={(e) => setEnvName(e.target.value)}
-            placeholder="Production"
-          />
-        </div>
-        <div className="field">
-          <label>Base URL</label>
-          <input
-            value={envUrl}
-            onChange={(e) => setEnvUrl(e.target.value)}
-            placeholder="https://example.com"
-            style={{ minWidth: 260 }}
-          />
-        </div>
-        <div className="field" style={{ justifyContent: "flex-end" }}>
-          <label>&nbsp;</label>
-          <button className="btn" onClick={createEnv}>
-            Add Environment
-          </button>
+      <div className="panel-box">
+        <div className="form-row" style={{ marginBottom: 0 }}>
+          <div className="field">
+            <label>Name</label>
+            <input
+              value={envName}
+              onChange={(e) => setEnvName(e.target.value)}
+              placeholder="Production"
+            />
+          </div>
+          <div className="field" style={{ flex: 1 }}>
+            <label>Base URL</label>
+            <input
+              value={envUrl}
+              onChange={(e) => setEnvUrl(e.target.value)}
+              placeholder="https://example.com"
+              style={{ width: "100%", minWidth: 200 }}
+            />
+          </div>
+          <div className="field">
+            <label>&nbsp;</label>
+            <button className="btn" onClick={createEnv}>
+              Add environment
+            </button>
+          </div>
         </div>
       </div>
 
       {envs.length === 0 && (
-        <div className="empty">No environments yet.</div>
+        <div className="empty">No environments yet. Add a base URL above.</div>
       )}
       {envs.map((e) => (
         <div
@@ -222,25 +233,32 @@ export default function ProjectPage() {
       ))}
 
       <h2>Tests</h2>
-      <div className="form-row">
-        <div className="field">
-          <label>New test name</label>
-          <input
-            value={testName}
-            onChange={(e) => setTestName(e.target.value)}
-            placeholder="Homepage smoke"
-            onKeyDown={(e) => e.key === "Enter" && createTest()}
-          />
-        </div>
-        <div className="field" style={{ justifyContent: "flex-end" }}>
-          <label>&nbsp;</label>
-          <button className="btn" onClick={createTest}>
-            Create Test
-          </button>
+      <div className="panel-box">
+        <div className="form-row" style={{ marginBottom: 0 }}>
+          <div className="field" style={{ flex: 1 }}>
+            <label>New test name</label>
+            <input
+              value={testName}
+              onChange={(e) => setTestName(e.target.value)}
+              placeholder="Homepage smoke / Login flow"
+              onKeyDown={(e) => e.key === "Enter" && createTest()}
+              style={{ width: "100%", minWidth: 0 }}
+            />
+          </div>
+          <div className="field">
+            <label>&nbsp;</label>
+            <button className="btn" onClick={createTest}>
+              Create test
+            </button>
+          </div>
         </div>
       </div>
 
-      {tests.length === 0 && <div className="empty">No tests yet.</div>}
+      {tests.length === 0 && (
+        <div className="empty">
+          No tests yet. Create one to open the codeless step editor.
+        </div>
+      )}
       {tests.map((t) => (
         <div
           key={t.id}
