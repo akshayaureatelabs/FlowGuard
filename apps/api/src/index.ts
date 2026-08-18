@@ -1,5 +1,8 @@
 import express from "express";
 import cors from "cors";
+import helmet from "helmet";
+import rateLimit from "express-rate-limit";
+import swaggerUi from "swagger-ui-express";
 import { v4 as uuid } from "uuid";
 import {
   CreateProjectBody,
@@ -13,16 +16,87 @@ import {
 } from "@flowguard/shared";
 import { store } from "./store.js";
 import { runLocalTest } from "./local-runner.js";
+import {
+  authMiddleware,
+  registerUser,
+  loginUser,
+  AUTH_DISABLED,
+} from "./auth.js";
+import { openApiSpec } from "./openapi.js";
+import { trackRequest, trackRunStarted, getMetrics } from "./metrics.js";
 
 const app = express();
 const PORT = Number(process.env.PORT) || 3001;
+const startedAt = Date.now();
 
+app.use(helmet({ contentSecurityPolicy: false }));
 app.use(cors());
-app.use(express.json());
+app.use(express.json({ limit: "2mb" }));
+app.use((req, _res, next) => {
+  trackRequest();
+  next();
+});
+
+const limiter = rateLimit({
+  windowMs: 60_000,
+  max: Number(process.env.RATE_LIMIT_MAX) || 300,
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+app.use("/api", limiter);
 
 app.get("/health", (_req, res) => {
-  res.json({ status: "ok", time: new Date().toISOString() });
+  const m = getMetrics();
+  res.json({
+    status: "ok",
+    time: new Date().toISOString(),
+    uptimeSec: m.uptimeSec,
+    auth: AUTH_DISABLED ? "disabled" : "jwt+apiKey",
+    database: process.env.USE_DATABASE === "true" ? "postgres" : "memory",
+    metrics: m,
+  });
 });
+
+app.get("/metrics", (_req, res) => {
+  res.json(getMetrics());
+});
+
+app.use("/docs", swaggerUi.serve, swaggerUi.setup(openApiSpec));
+app.get("/openapi.json", (_req, res) => res.json(openApiSpec));
+
+// ── Auth ────────────────────────────────────────────────────────────────────
+app.post("/api/auth/register", async (req, res) => {
+  try {
+    const { email, password, name } = req.body || {};
+    if (!email || !password) {
+      return res.status(400).json({ error: "email and password required" });
+    }
+    const user = await registerUser(email, password, name);
+    res.status(201).json(user);
+  } catch (e: any) {
+    res.status(400).json({ error: e.message });
+  }
+});
+
+app.post("/api/auth/login", async (req, res) => {
+  try {
+    const { email, password } = req.body || {};
+    if (!email || !password) {
+      return res.status(400).json({ error: "email and password required" });
+    }
+    const result = await loginUser(email, password);
+    res.json(result);
+  } catch (e: any) {
+    res.status(401).json({ error: e.message });
+  }
+});
+
+app.get("/api/auth/me", authMiddleware, (req, res) => {
+  res.json({ user: req.user });
+});
+
+// Protect API routes (auth disabled automatically in local memory mode)
+app.use("/api", authMiddleware);
 
 app.get("/api/projects", (_req, res) => {
   res.json(store.listProjects());
@@ -147,6 +221,8 @@ app.post("/api/tests/:id/runs", async (req, res) => {
   if (!env) return res.status(404).json({ error: "Environment not found" });
 
   const run = store.createRun(test.id, env.id);
+  trackRunStarted();
+
   const useLocal =
     process.env.USE_LOCAL_EXECUTION === "true" ||
     process.env.USE_LOCAL_EXECUTION === undefined;
@@ -174,7 +250,6 @@ app.get("/api/tests/:id/runs", (req, res) => {
   res.json(store.listRuns(req.params.id));
 });
 
-// ── Modules ─────────────────────────────────────────────────────────────────
 app.get("/api/projects/:projectId/modules", (req, res) => {
   res.json(store.listModules(req.params.projectId));
 });
@@ -208,7 +283,6 @@ app.delete("/api/modules/:id", (req, res) => {
   res.status(204).send();
 });
 
-// ── Schedules ───────────────────────────────────────────────────────────────
 app.get("/api/schedules", (req, res) => {
   const testId = req.query.testId as string | undefined;
   res.json(store.listSchedules(testId));
@@ -236,7 +310,6 @@ app.delete("/api/schedules/:id", (req, res) => {
   res.status(204).send();
 });
 
-// Background scheduler — every 30s check due schedules
 setInterval(() => {
   const due = store.dueSchedules();
   for (const sch of due) {
@@ -244,6 +317,7 @@ setInterval(() => {
     const env = store.getEnvironment(sch.environmentId);
     if (!test || !env) continue;
     const run = store.createRun(test.id, env.id);
+    trackRunStarted();
     const interval = sch.intervalMinutes || 60;
     store.updateSchedule(sch.id, {
       lastRunAt: new Date().toISOString(),
@@ -263,6 +337,10 @@ setInterval(() => {
 
 app.listen(PORT, () => {
   console.log(`FlowGuard API listening on http://localhost:${PORT}`);
+  console.log(`Docs: http://localhost:${PORT}/docs`);
+  console.log(`USE_DATABASE=${process.env.USE_DATABASE ?? "false"}`);
+  console.log(`AUTH=${AUTH_DISABLED ? "disabled (local)" : "enabled"}`);
   console.log(`USE_LOCAL_EXECUTION=${process.env.USE_LOCAL_EXECUTION ?? "true"}`);
-  console.log("Scheduler tick every 30s");
 });
+
+export { app };

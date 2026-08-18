@@ -1,0 +1,44 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  api-test:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: .
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9.15.0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+
+      - name: Install
+        run: pnpm install
+
+      - name: API unit/integration tests
+        working-directory: apps/api
+        env:
+          USE_DATABASE: "false"
+          AUTH_DISABLED: "true"
+          JWT_SECRET: ci-secret
+        run: pnpm test
+
+  docker-api:
+    runs-on: ubuntu-latest
+    needs: api-test
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build API image
+        run: docker build -f apps/api/Dockerfile -t flowguard-api:ci .

@@ -1,0 +1,51 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: flowguard
+      POSTGRES_PASSWORD: flowguard
+      POSTGRES_DB: flowguard
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U flowguard"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  api:
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+    environment:
+      PORT: 3001
+      DATABASE_URL: postgresql://flowguard:flowguard@postgres:5432/flowguard?schema=public
+      USE_DATABASE: "false"
+      USE_LOCAL_EXECUTION: "true"
+      JWT_SECRET: change-me-in-production
+      AUTH_DISABLED: "true"
+      ARTIFACTS_DIR: /data/artifacts
+    ports:
+      - "3001:3001"
+    volumes:
+      - artifacts:/data/artifacts
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  web:
+    build:
+      context: .
+      dockerfile: apps/web/Dockerfile
+    environment:
+      NEXT_PUBLIC_API_URL: http://localhost:3001
+    ports:
+      - "3000:3000"
+    depends_on:
+      - api
+
+volumes:
+  pgdata:
+  artifacts:
