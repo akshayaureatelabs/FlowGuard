@@ -1,12 +1,11 @@
 @import url("https://fonts.googleapis.com/css2?family=Syne:wght@500;600;700;800&family=DM+Sans:ital,opsz,wght@0,9..40,400;0,9..40,500;0,9..40,600;1,9..40,400&display=swap");
 
 /* ═══════════════════════════════════════════════════════════
-   FlowGuard — Premium dark SaaS (3D depth without WebGL)
-   Cues: landing.love 3D sites · glass · surface scale · ambient light
+   FlowGuard — Premium dark SaaS + LaserFlow / mouse motion
+   Cues: reactbits laser-flow · glass · surface scale
    ═══════════════════════════════════════════════════════════ */
 
 :root {
-  /* Surface scale (not pure black) */
   --bg: #06070b;
   --bg-elevated: #0a0c12;
   --surface: rgba(16, 18, 28, 0.55);
@@ -22,7 +21,6 @@
   --text-secondary: #aeb6c9;
   --muted: #6e768c;
 
-  /* Premium accent: cyan → violet (tech 3D sites) */
   --accent: #5b8cff;
   --accent-2: #8b7cf6;
   --accent-3: #22d3ee;
@@ -55,6 +53,9 @@
 
   --font-display: "Syne", system-ui, sans-serif;
   --font-body: "DM Sans", system-ui, sans-serif;
+
+  --mx: 50%;
+  --my: 40%;
 }
 
 * {
@@ -78,7 +79,49 @@ body {
   overflow-x: hidden;
 }
 
-/* ── Cinematic ambient depth (landing.love style) ───────── */
+/* ── LaserFlow canvas layer ─────────────────────────────── */
+.laser-flow {
+  position: fixed;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  z-index: 0;
+  opacity: 0.85;
+  mix-blend-mode: screen;
+}
+
+.mouse-particles {
+  position: fixed;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  z-index: 0;
+  mix-blend-mode: screen;
+}
+
+.mouse-glow {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 420px;
+  height: 420px;
+  border-radius: 50%;
+  pointer-events: none;
+  z-index: 0;
+  background: radial-gradient(
+    circle,
+    rgba(91, 140, 255, 0.16) 0%,
+    rgba(34, 211, 238, 0.08) 35%,
+    transparent 70%
+  );
+  filter: blur(40px);
+  will-change: transform;
+  opacity: 0.9;
+}
+
+/* Ambient orbs */
 body::before,
 body::after {
   content: "";
@@ -96,8 +139,8 @@ body::before {
   right: -120px;
   background: radial-gradient(
     circle,
-    rgba(91, 140, 255, 0.42) 0%,
-    rgba(139, 124, 246, 0.18) 45%,
+    rgba(91, 140, 255, 0.35) 0%,
+    rgba(139, 124, 246, 0.14) 45%,
     transparent 70%
   );
   animation: floatA 20s ease-in-out infinite;
@@ -110,14 +153,13 @@ body::after {
   left: -100px;
   background: radial-gradient(
     circle,
-    rgba(34, 211, 238, 0.22) 0%,
-    rgba(139, 124, 246, 0.2) 50%,
+    rgba(34, 211, 238, 0.18) 0%,
+    rgba(139, 124, 246, 0.16) 50%,
     transparent 70%
   );
   animation: floatB 24s ease-in-out infinite;
 }
 
-/* Extra center glow for depth */
 .mesh-grid::before {
   content: "";
   position: absolute;
@@ -126,7 +168,7 @@ body::after {
   top: 40%;
   left: 50%;
   transform: translate(-50%, -50%);
-  background: radial-gradient(circle, rgba(91, 140, 255, 0.12), transparent 65%);
+  background: radial-gradient(circle, rgba(91, 140, 255, 0.1), transparent 65%);
   filter: blur(60px);
   pointer-events: none;
 }
@@ -141,7 +183,6 @@ body::after {
   50% { transform: translate(40px, -30px) scale(1.08); }
 }
 
-/* Perspective grid + film grain */
 .mesh-grid {
   position: fixed;
   inset: 0;
@@ -152,15 +193,14 @@ body::after {
   mask-image: radial-gradient(ellipse 80% 70% at 50% 40%, black 15%, transparent 70%);
   pointer-events: none;
   z-index: 0;
-  opacity: 0.55;
+  opacity: 0.45;
 }
 
-/* Subtle noise overlay */
 .mesh-grid::after {
   content: "";
   position: absolute;
   inset: 0;
-  opacity: 0.035;
+  opacity: 0.03;
   background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
   pointer-events: none;
 }
@@ -177,7 +217,7 @@ body::after {
   padding: 0 1.5rem 5rem;
 }
 
-/* ── Header — liquid glass ──────────────────────────────── */
+/* ── Header ─────────────────────────────────────────────── */
 .header {
   position: sticky;
   top: 0;
@@ -306,7 +346,7 @@ h2 {
   margin: 2.5rem 0 1rem;
 }
 
-/* ── Glass cards (elevated 3D edge) ──────────────────────── */
+/* ── Glass cards ────────────────────────────────────────── */
 .card,
 .panel-box,
 .panel,
@@ -329,7 +369,6 @@ h2 {
   overflow: hidden;
 }
 
-/* Top edge highlight = 3D bevel */
 .card::before {
   content: "";
   position: absolute;
@@ -343,6 +382,29 @@ h2 {
     transparent
   );
   pointer-events: none;
+}
+
+/* Shine sweep on hover */
+.card::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: -60%;
+  width: 40%;
+  height: 100%;
+  background: linear-gradient(
+    90deg,
+    transparent,
+    rgba(255, 255, 255, 0.06),
+    transparent
+  );
+  transform: skewX(-20deg);
+  transition: left 0.55s ease;
+  pointer-events: none;
+}
+
+.card:hover::after {
+  left: 120%;
 }
 
 .card:hover {
@@ -491,7 +553,7 @@ label {
   flex-direction: column;
 }
 
-/* ── Badges ─────────────────────────────────────────────── */
+/* ── Badges + process pulse ─────────────────────────────── */
 .badge {
   display: inline-flex;
   align-items: center;
@@ -522,6 +584,17 @@ label {
   background: var(--accent-soft);
   color: var(--accent);
   border-color: rgba(91, 140, 255, 0.32);
+  animation: pulseRun 1.6s ease-in-out infinite;
+  box-shadow: 0 0 0 0 rgba(91, 140, 255, 0.35);
+}
+
+@keyframes pulseRun {
+  0%, 100% {
+    box-shadow: 0 0 0 0 rgba(91, 140, 255, 0.35);
+  }
+  50% {
+    box-shadow: 0 0 0 6px rgba(91, 140, 255, 0);
+  }
 }
 
 /* ── Step editor ────────────────────────────────────────── */
@@ -620,7 +693,6 @@ label {
   padding: 0.95rem;
 }
 
-/* ── Empty / alerts ─────────────────────────────────────── */
 .empty {
   color: var(--muted);
   text-align: center;
@@ -654,7 +726,7 @@ label {
   margin-bottom: 1rem;
 }
 
-/* ── Results UI (history + screenshot gallery) ──────────── */
+/* ── Results UI ─────────────────────────────────────────── */
 .history-list {
   display: flex;
   flex-direction: column;
@@ -730,12 +802,18 @@ label {
   color: #fff;
 }
 
-/* Reduced motion */
 @media (prefers-reduced-motion: reduce) {
   body::before,
   body::after,
-  .logo-mark {
+  .logo-mark,
+  .badge-run,
+  .card::after {
     animation: none !important;
     transition: none !important;
+  }
+  .laser-flow,
+  .mouse-glow,
+  .mouse-particles {
+    display: none !important;
   }
 }
