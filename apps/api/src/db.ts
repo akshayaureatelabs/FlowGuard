@@ -1,3 +1,4 @@
+import "./env.js";
 import { createRequire } from "module";
 
 export const useDatabase = process.env.USE_DATABASE === "true";
