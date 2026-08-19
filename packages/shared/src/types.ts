@@ -167,6 +167,7 @@ export type Step = z.infer<typeof StepSchema>;
 export const ProjectSchema = z.object({
   id: z.string(),
   name: z.string().min(1),
+  ownerId: z.string().optional(),
   createdAt: z.string(),
   updatedAt: z.string(),
 });

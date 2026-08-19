@@ -2,6 +2,7 @@ import { createRequire } from "module";
 import { useMongo, usePostgres } from "./db.js";
 import { store as memoryStore } from "./store.js";
 import type {
+  Project,
   TestRun,
   Step,
   Schedule,
@@ -12,10 +13,10 @@ const require = createRequire(import.meta.url);
 
 /** Unified async data access — mongo | postgres | memory. */
 class MemoryAsync {
-  createProject(name: string) {
-    return Promise.resolve(memoryStore.createProject(name));
+  createProject(name: string, ownerId?: string) {
+    return Promise.resolve(memoryStore.createProject(name, ownerId));
   }
-  listProjects() {
+  listProjects(): Promise<Project[]> {
     return Promise.resolve(memoryStore.listProjects());
   }
   getProject(id: string) {

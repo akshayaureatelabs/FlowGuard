@@ -17,7 +17,7 @@ import {
 } from "@flowguard/shared";
 import { dbMode, useMongo, getMongo } from "./db.js";
 import { repo } from "./repo.js";
-import { runLocalTest } from "./local-runner.js";
+import { runLocalTest, ARTIFACTS_DIR } from "./local-runner.js";
 import {
   authMiddleware,
   registerUser,
@@ -25,12 +25,20 @@ import {
   AUTH_DISABLED,
 } from "./auth.js";
 import { openApiSpec } from "./openapi.js";
-import { trackRequest, trackRunStarted, getMetrics } from "./metrics.js";
+import {
+  trackRequest,
+  trackRunStarted,
+  trackRunFinished,
+  getMetrics,
+} from "./metrics.js";
+import { notifyForRun } from "./notify.js";
 
 const app = express();
 const PORT = Number(process.env.PORT) || 3001;
 
-app.use(helmet({ contentSecurityPolicy: false }));
+// Cross-Origin-Resource-Policy disabled so the web app (different origin) can
+// embed artifacts (screenshots/diffs) served from this API.
+app.use(helmet({ contentSecurityPolicy: false, crossOriginResourcePolicy: false }));
 app.use(cors());
 app.use(express.json({ limit: "2mb" }));
 app.use((_req, _res, next) => {
@@ -47,6 +55,35 @@ app.use(
     legacyHeaders: false,
   })
 );
+
+// Serve run artifacts (screenshots, diffs, videos) captured during test runs.
+app.use("/artifacts", express.static(ARTIFACTS_DIR));
+
+type AuthedRequest = { user?: { id: string; email?: string } };
+
+function isLocalUser(user: AuthedRequest["user"] | undefined): boolean {
+  return !user || user.id === "local";
+}
+
+function canAccessProject(user: AuthedRequest["user"] | undefined, project: any): boolean {
+  if (!project) return false;
+  if (!user || user.id === "local") return true;
+  // Legacy projects without an owner stay visible to everyone; otherwise owner-only.
+  return !project.ownerId || project.ownerId === user.id;
+}
+
+async function accessibleProject(req: any, projectId: string): Promise<any | null | false> {
+  const project = await repo.getProject(projectId);
+  if (!project) return null;
+  return canAccessProject(req.user, project) ? project : false;
+}
+
+async function accessibleTest(req: any, testId: string): Promise<any | null | false> {
+  const test = await repo.getTest(testId);
+  if (!test) return null;
+  const project = await repo.getProject(test.projectId);
+  return canAccessProject(req.user, project) ? test : false;
+}
 
 app.get("/health", (_req, res) => {
   const m = getMetrics();
@@ -92,31 +129,42 @@ app.get("/api/auth/me", authMiddleware, (req, res) => {
 
 app.use("/api", authMiddleware);
 
-app.get("/api/projects", async (_req, res) => {
-  res.json(await repo.listProjects());
+app.get("/api/projects", async (req, res) => {
+  const projects = await repo.listProjects();
+  res.json(projects.filter((p: any) => canAccessProject(req.user, p)));
 });
 
 app.post("/api/projects", async (req, res) => {
   const parsed = CreateProjectBody.safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ error: parsed.error.flatten() });
-  res.status(201).json(await repo.createProject(parsed.data.name));
+  res.status(201).json(await repo.createProject(parsed.data.name, req.user?.id));
 });
 
 app.get("/api/projects/:id", async (req, res) => {
   const project = await repo.getProject(req.params.id);
   if (!project) return res.status(404).json({ error: "Project not found" });
+  if (!canAccessProject(req.user, project))
+    return res.status(403).json({ error: "Access denied" });
   res.json(project);
 });
 
 app.put("/api/projects/:id", async (req, res) => {
   const parsed = CreateProjectBody.safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ error: parsed.error.flatten() });
-  const project = await repo.updateProject(req.params.id, parsed.data.name);
+  const project = await repo.getProject(req.params.id);
   if (!project) return res.status(404).json({ error: "Project not found" });
-  res.json(project);
+  if (!canAccessProject(req.user, project))
+    return res.status(403).json({ error: "Access denied" });
+  const updated = await repo.updateProject(req.params.id, parsed.data.name);
+  if (!updated) return res.status(404).json({ error: "Project not found" });
+  res.json(updated);
 });
 
 app.delete("/api/projects/:id", async (req, res) => {
+  const project = await repo.getProject(req.params.id);
+  if (!project) return res.status(404).json({ error: "Project not found" });
+  if (!canAccessProject(req.user, project))
+    return res.status(403).json({ error: "Access denied" });
   if (!(await repo.deleteProject(req.params.id)))
     return res.status(404).json({ error: "Project not found" });
   res.status(204).send();
@@ -127,8 +175,9 @@ app.get("/api/projects/:projectId/environments", async (req, res) => {
 });
 
 app.post("/api/projects/:projectId/environments", async (req, res) => {
-  if (!(await repo.getProject(req.params.projectId)))
-    return res.status(404).json({ error: "Project not found" });
+  const gate = await accessibleProject(req, req.params.projectId);
+  if (gate === null) return res.status(404).json({ error: "Project not found" });
+  if (gate === false) return res.status(403).json({ error: "Access denied" });
   const parsed = CreateEnvironmentBody.safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ error: parsed.error.flatten() });
   res.status(201).json(
@@ -142,6 +191,10 @@ app.post("/api/projects/:projectId/environments", async (req, res) => {
 });
 
 app.put("/api/environments/:id", async (req, res) => {
+  const current = await repo.getEnvironment(req.params.id);
+  if (!current) return res.status(404).json({ error: "Environment not found" });
+  const gate = await accessibleProject(req, current.projectId);
+  if (gate === false) return res.status(403).json({ error: "Access denied" });
   const env = await repo.updateEnvironment(req.params.id, {
     name: req.body?.name,
     baseUrl: req.body?.baseUrl,
@@ -152,6 +205,10 @@ app.put("/api/environments/:id", async (req, res) => {
 });
 
 app.delete("/api/environments/:id", async (req, res) => {
+  const current = await repo.getEnvironment(req.params.id);
+  if (!current) return res.status(404).json({ error: "Environment not found" });
+  const gate = await accessibleProject(req, current.projectId);
+  if (gate === false) return res.status(403).json({ error: "Access denied" });
   if (!(await repo.deleteEnvironment(req.params.id)))
     return res.status(404).json({ error: "Environment not found" });
   res.status(204).send();
@@ -162,22 +219,27 @@ app.get("/api/projects/:projectId/tests", async (req, res) => {
 });
 
 app.post("/api/projects/:projectId/tests", async (req, res) => {
-  if (!(await repo.getProject(req.params.projectId)))
-    return res.status(404).json({ error: "Project not found" });
+  const gate = await accessibleProject(req, req.params.projectId);
+  if (gate === null) return res.status(404).json({ error: "Project not found" });
+  if (gate === false) return res.status(403).json({ error: "Access denied" });
   const parsed = CreateTestBody.safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ error: parsed.error.flatten() });
   res.status(201).json(await repo.createTest(req.params.projectId, parsed.data.name));
 });
 
 app.get("/api/tests/:id", async (req, res) => {
-  const test = await repo.getTest(req.params.id);
-  if (!test) return res.status(404).json({ error: "Test not found" });
-  res.json(test);
+  const gate = await accessibleTest(req, req.params.id);
+  if (gate === null) return res.status(404).json({ error: "Test not found" });
+  if (gate === false) return res.status(403).json({ error: "Access denied" });
+  res.json(gate);
 });
 
 app.put("/api/tests/:id", async (req, res) => {
   const parsed = CreateTestBody.safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ error: parsed.error.flatten() });
+  const gate = await accessibleTest(req, req.params.id);
+  if (gate === null) return res.status(404).json({ error: "Test not found" });
+  if (gate === false) return res.status(403).json({ error: "Access denied" });
   const test = await repo.updateTest(req.params.id, parsed.data.name);
   if (!test) return res.status(404).json({ error: "Test not found" });
   res.json(test);
@@ -186,12 +248,18 @@ app.put("/api/tests/:id", async (req, res) => {
 app.put("/api/tests/:id/settings", async (req, res) => {
   const parsed = UpdateTestSettingsBody.safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ error: parsed.error.flatten() });
+  const gate = await accessibleTest(req, req.params.id);
+  if (gate === null) return res.status(404).json({ error: "Test not found" });
+  if (gate === false) return res.status(403).json({ error: "Access denied" });
   const test = await repo.updateTestSettings(req.params.id, parsed.data);
   if (!test) return res.status(404).json({ error: "Test not found" });
   res.json(test);
 });
 
 app.delete("/api/tests/:id", async (req, res) => {
+  const gate = await accessibleTest(req, req.params.id);
+  if (gate === null) return res.status(404).json({ error: "Test not found" });
+  if (gate === false) return res.status(403).json({ error: "Access denied" });
   if (!(await repo.deleteTest(req.params.id)))
     return res.status(404).json({ error: "Test not found" });
   res.status(204).send();
@@ -200,15 +268,32 @@ app.delete("/api/tests/:id", async (req, res) => {
 app.put("/api/tests/:id/steps", async (req, res) => {
   const parsed = UpdateStepsBody.safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ error: parsed.error.flatten() });
+  const gate = await accessibleTest(req, req.params.id);
+  if (gate === null) return res.status(404).json({ error: "Test not found" });
+  if (gate === false) return res.status(403).json({ error: "Access denied" });
   const steps = parsed.data.steps.map((s) => ({ ...s, id: s.id || uuid() }));
   const test = await repo.updateSteps(req.params.id, steps);
   if (!test) return res.status(404).json({ error: "Test not found" });
   res.json(test);
 });
 
+// Append steps — used by the browser recorder to push recorded actions.
+app.post("/api/tests/:id/steps", async (req, res) => {
+  const gate = await accessibleTest(req, req.params.id);
+  if (gate === null) return res.status(404).json({ error: "Test not found" });
+  if (gate === false) return res.status(403).json({ error: "Access denied" });
+  const parsed = UpdateStepsBody.safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ error: parsed.error.flatten() });
+  const incoming = parsed.data.steps.map((s) => ({ ...s, id: s.id || uuid() }));
+  const test = await repo.updateSteps(req.params.id, [...(gate.steps || []), ...incoming]);
+  res.status(201).json({ ...test, appended: incoming.length });
+});
+
 app.post("/api/tests/:id/runs", async (req, res) => {
-  const test = await repo.getTest(req.params.id);
-  if (!test) return res.status(404).json({ error: "Test not found" });
+  const gate = await accessibleTest(req, req.params.id);
+  if (gate === null) return res.status(404).json({ error: "Test not found" });
+  if (gate === false) return res.status(403).json({ error: "Access denied" });
+  const test = gate;
   const parsed = CreateRunBody.safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ error: parsed.error.flatten() });
   const env = await repo.getEnvironment(parsed.data.environmentId);
@@ -222,14 +307,18 @@ app.post("/api/tests/:id/runs", async (req, res) => {
     process.env.USE_LOCAL_EXECUTION === undefined;
 
   if (useLocal) {
-    runLocalTest(run.id, test, env).catch(async (err) => {
-      console.error("Local run failed:", err);
-      await repo.updateRun(run.id, {
-        status: "error",
-        error: String(err),
-        finishedAt: new Date().toISOString(),
+    runLocalTest(run.id, test, env)
+      .then(() => notifyForRun(run.id))
+      .catch(async (err) => {
+        console.error("Local run failed:", err);
+        trackRunFinished();
+        await repo.updateRun(run.id, {
+          status: "error",
+          error: String(err),
+          finishedAt: new Date().toISOString(),
+        });
+        await notifyForRun(run.id);
       });
-    });
   }
   res.status(201).json(run);
 });
@@ -237,20 +326,29 @@ app.post("/api/tests/:id/runs", async (req, res) => {
 app.get("/api/runs/:id", async (req, res) => {
   const run = await repo.getRun(req.params.id);
   if (!run) return res.status(404).json({ error: "Run not found" });
+  const gate = await accessibleTest(req, run.testId);
+  if (gate === false) return res.status(403).json({ error: "Access denied" });
   res.json(run);
 });
 
 app.get("/api/tests/:id/runs", async (req, res) => {
+  const gate = await accessibleTest(req, req.params.id);
+  if (gate === null) return res.status(404).json({ error: "Test not found" });
+  if (gate === false) return res.status(403).json({ error: "Access denied" });
   res.json(await repo.listRuns(req.params.id));
 });
 
 app.get("/api/projects/:projectId/modules", async (req, res) => {
+  const gate = await accessibleProject(req, req.params.projectId);
+  if (gate === null) return res.status(404).json({ error: "Project not found" });
+  if (gate === false) return res.status(403).json({ error: "Access denied" });
   res.json(await repo.listModules(req.params.projectId));
 });
 
 app.post("/api/projects/:projectId/modules", async (req, res) => {
-  if (!(await repo.getProject(req.params.projectId)))
-    return res.status(404).json({ error: "Project not found" });
+  const gate = await accessibleProject(req, req.params.projectId);
+  if (gate === null) return res.status(404).json({ error: "Project not found" });
+  if (gate === false) return res.status(403).json({ error: "Access denied" });
   const parsed = CreateModuleBody.safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ error: parsed.error.flatten() });
   res.status(201).json(await repo.createModule(req.params.projectId, parsed.data.name));
@@ -259,45 +357,70 @@ app.post("/api/projects/:projectId/modules", async (req, res) => {
 app.get("/api/modules/:id", async (req, res) => {
   const mod = await repo.getModule(req.params.id);
   if (!mod) return res.status(404).json({ error: "Module not found" });
+  const gate = await accessibleProject(req, mod.projectId);
+  if (gate === false) return res.status(403).json({ error: "Access denied" });
   res.json(mod);
 });
 
 app.put("/api/modules/:id/steps", async (req, res) => {
   const parsed = UpdateStepsBody.safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ error: parsed.error.flatten() });
-  const steps = parsed.data.steps.map((s) => ({ ...s, id: s.id || uuid() }));
-  const mod = await repo.updateModuleSteps(req.params.id, steps);
+  const mod = await repo.getModule(req.params.id);
   if (!mod) return res.status(404).json({ error: "Module not found" });
-  res.json(mod);
+  const gate = await accessibleProject(req, mod.projectId);
+  if (gate === false) return res.status(403).json({ error: "Access denied" });
+  const steps = parsed.data.steps.map((s) => ({ ...s, id: s.id || uuid() }));
+  const updated = await repo.updateModuleSteps(req.params.id, steps);
+  if (!updated) return res.status(404).json({ error: "Module not found" });
+  res.json(updated);
 });
 
 app.delete("/api/modules/:id", async (req, res) => {
+  const mod = await repo.getModule(req.params.id);
+  if (!mod) return res.status(404).json({ error: "Module not found" });
+  const gate = await accessibleProject(req, mod.projectId);
+  if (gate === false) return res.status(403).json({ error: "Access denied" });
   if (!(await repo.deleteModule(req.params.id)))
     return res.status(404).json({ error: "Module not found" });
   res.status(204).send();
 });
 
 app.get("/api/schedules", async (req, res) => {
-  res.json(await repo.listSchedules(req.query.testId as string | undefined));
+  const schedules = await repo.listSchedules(req.query.testId as string | undefined);
+  const accessible = [];
+  for (const sch of schedules) {
+    const gate = await accessibleTest(req, sch.testId);
+    if (gate) accessible.push(sch);
+  }
+  res.json(accessible);
 });
 
 app.post("/api/schedules", async (req, res) => {
   const parsed = CreateScheduleBody.safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ error: parsed.error.flatten() });
-  if (!(await repo.getTest(parsed.data.testId)))
-    return res.status(404).json({ error: "Test not found" });
+  const gate = await accessibleTest(req, parsed.data.testId);
+  if (gate === null) return res.status(404).json({ error: "Test not found" });
+  if (gate === false) return res.status(403).json({ error: "Access denied" });
   if (!(await repo.getEnvironment(parsed.data.environmentId)))
     return res.status(404).json({ error: "Environment not found" });
   res.status(201).json(await repo.createSchedule(parsed.data));
 });
 
 app.put("/api/schedules/:id", async (req, res) => {
-  const sch = await repo.updateSchedule(req.params.id, req.body || {});
+  const sch = await repo.getSchedule(req.params.id);
   if (!sch) return res.status(404).json({ error: "Schedule not found" });
-  res.json(sch);
+  const gate = await accessibleTest(req, sch.testId);
+  if (gate === false) return res.status(403).json({ error: "Access denied" });
+  const updated = await repo.updateSchedule(req.params.id, req.body || {});
+  if (!updated) return res.status(404).json({ error: "Schedule not found" });
+  res.json(updated);
 });
 
 app.delete("/api/schedules/:id", async (req, res) => {
+  const sch = await repo.getSchedule(req.params.id);
+  if (!sch) return res.status(404).json({ error: "Schedule not found" });
+  const gate = await accessibleTest(req, sch.testId);
+  if (gate === false) return res.status(403).json({ error: "Access denied" });
   if (!(await repo.deleteSchedule(req.params.id)))
     return res.status(404).json({ error: "Schedule not found" });
   res.status(204).send();
@@ -317,14 +440,18 @@ setInterval(async () => {
         lastRunAt: new Date().toISOString(),
         nextRunAt: new Date(Date.now() + interval * 60_000).toISOString(),
       });
-      runLocalTest(run.id, test, env).catch(async (err) => {
-        console.error("Scheduled run failed:", err);
-        await repo.updateRun(run.id, {
-          status: "error",
-          error: String(err),
-          finishedAt: new Date().toISOString(),
+      runLocalTest(run.id, test, env)
+        .then(() => notifyForRun(run.id))
+        .catch(async (err) => {
+          console.error("Scheduled run failed:", err);
+          trackRunFinished();
+          await repo.updateRun(run.id, {
+            status: "error",
+            error: String(err),
+            finishedAt: new Date().toISOString(),
+          });
+          await notifyForRun(run.id);
         });
-      });
       console.log(`[scheduler] triggered schedule ${sch.id} → run ${run.id}`);
     }
   } catch (err) {

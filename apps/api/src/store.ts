@@ -20,9 +20,9 @@ class MemoryStore {
   modules = new Map<string, Module>();
   schedules = new Map<string, Schedule>();
 
-  createProject(name: string): Project {
+  createProject(name: string, ownerId?: string): Project {
     const id = uuid();
-    const project: Project = { id, name, createdAt: now(), updatedAt: now() };
+    const project: Project = { id, name, ownerId, createdAt: now(), updatedAt: now() };
     this.projects.set(id, project);
     return project;
   }

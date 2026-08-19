@@ -22,10 +22,11 @@ function now() {
 }
 
 export class MongoStore {
-  async createProject(name: string): Promise<Project> {
+  async createProject(name: string, ownerId?: string): Promise<Project> {
     const p: Project = {
       id: uuid(),
       name,
+      ownerId,
       createdAt: now(),
       updatedAt: now(),
     };

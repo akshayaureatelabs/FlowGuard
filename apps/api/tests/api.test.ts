@@ -15,6 +15,13 @@ import {
   loginUser,
   AUTH_DISABLED,
 } from "../src/auth.js";
+import { artifactUrl, ARTIFACTS_DIR } from "../src/local-runner.js";
+import path from "path";
+import {
+  trackRunStarted,
+  trackRunFinished,
+  getMetrics,
+} from "../src/metrics.js";
 
 function buildApp() {
   const app = express();
@@ -82,6 +89,15 @@ function buildApp() {
     res.json(test);
   });
 
+  app.post("/api/tests/:id/steps", authMiddleware, (req, res) => {
+    const existing = store.getTest(req.params.id);
+    if (!existing) return res.status(404).json({ error: "Test not found" });
+    const incoming = (req.body.steps || []).map((s: any) => ({ ...s, id: s.id || uuid() }));
+    const test = store.updateSteps(req.params.id, [...(existing.steps || []), ...incoming]);
+    if (!test) return res.status(404).json({ error: "Test not found" });
+    res.status(201).json({ ...test, appended: incoming.length });
+  });
+
   return app;
 }
 
@@ -143,5 +159,48 @@ describe("FlowGuard API", () => {
     const res = await request(app).get("/api/projects");
     expect(res.status).toBe(200);
     expect(Array.isArray(res.body)).toBe(true);
+  });
+
+  it("POST /api/tests/:id/steps appends instead of replacing", async () => {
+    const p = await request(app).post("/api/projects").send({ name: "Append" });
+    const test = await request(app)
+      .post(`/api/projects/${p.body.id}/tests`)
+      .send({ name: "Recorder" });
+    const tid = test.body.id;
+
+    await request(app).put(`/api/tests/${tid}/steps`).send({
+      steps: [{ type: "navigate", config: { url: "https://example.com" } }],
+    });
+
+    const append = await request(app)
+      .post(`/api/tests/${tid}/steps`)
+      .send({ steps: [{ type: "click", config: { selector: "#go" } }] });
+    expect(append.status).toBe(201);
+    expect(append.body.appended).toBe(1);
+    expect(append.body.steps.length).toBe(2);
+  });
+
+  it("artifactUrl converts artifact paths to /artifacts URLs", () => {
+    const local = path.join(ARTIFACTS_DIR, "run1", "final.png");
+    expect(artifactUrl(local)).toMatch(/^\/artifacts\/run1\/final\.png$/);
+    expect(artifactUrl("https://cdn.example.com/x.png")).toBe(
+      "https://cdn.example.com/x.png"
+    );
+  });
+
+  it("metrics track runStarted/runFinished counts", async () => {
+    const before = getMetrics();
+    trackRunStarted();
+    trackRunFinished();
+    const after = getMetrics();
+    expect(after.runsStarted).toBe(before.runsStarted + 1);
+    expect(after.runsFinished).toBe(before.runsFinished + 1);
+  });
+
+  it("memory store persists ownerId on projects", () => {
+    const ownerId = "user-123";
+    const project = store.createProject("Owned", ownerId);
+    expect(project.ownerId).toBe(ownerId);
+    expect(store.getProject(project.id)?.ownerId).toBe(ownerId);
   });
 });

@@ -20,14 +20,15 @@ function toIso(d: Date | string) {
   return typeof d === "string" ? d : d.toISOString();
 }
 
-function mapProject(p: any): Project {
-  return {
-    id: p.id,
-    name: p.name,
-    createdAt: toIso(p.createdAt),
-    updatedAt: toIso(p.updatedAt),
-  };
-}
+  function mapProject(p: any): Project {
+    return {
+      id: p.id,
+      name: p.name,
+      ...(p.ownerId ? { ownerId: p.ownerId } : {}),
+      createdAt: toIso(p.createdAt),
+      updatedAt: toIso(p.updatedAt),
+    };
+  }
 
 function mapEnv(e: any): Environment {
   return {
@@ -97,8 +98,10 @@ function mapSchedule(s: any): Schedule {
 }
 
 export class PrismaStore {
-  async createProject(name: string): Promise<Project> {
-    return mapProject(await prisma().project.create({ data: { name } }));
+  async createProject(name: string, ownerId?: string): Promise<Project> {
+    return mapProject(
+      await prisma().project.create({ data: { name, ...(ownerId ? { ownerId } : {}) } })
+    );
   }
   async listProjects(): Promise<Project[]> {
     return (await prisma().project.findMany({ orderBy: { createdAt: "desc" } })).map(mapProject);

@@ -6,3 +6,7 @@ coverage
 playwright-report
 artifacts
 *.log
+
+*.tsbuildinfo
+apps/api/pnpm-lock.yaml
+

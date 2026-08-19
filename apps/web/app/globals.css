@@ -654,6 +654,77 @@ label {
   margin-bottom: 1rem;
 }
 
+/* ── Results UI (history + screenshot gallery) ──────────── */
+.history-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.55rem;
+}
+
+.history-item {
+  display: flex;
+  align-items: center;
+  gap: 0.9rem;
+  flex-wrap: wrap;
+  cursor: pointer;
+}
+
+.history-item.selected {
+  border-color: rgba(91, 140, 255, 0.5);
+  box-shadow: 0 0 0 3px rgba(91, 140, 255, 0.12), var(--shadow);
+}
+
+.gallery {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  gap: 0.7rem;
+  margin-top: 0.6rem;
+}
+
+.shot {
+  position: relative;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  overflow: hidden;
+  background: var(--surface-2);
+}
+
+.shot img {
+  width: 100%;
+  height: 108px;
+  object-fit: cover;
+  object-position: top;
+  display: block;
+  cursor: zoom-in;
+  background: #0b0f1a;
+}
+
+.shot figcaption {
+  font-size: 0.68rem;
+  color: var(--muted);
+  padding: 0.35rem 0.6rem;
+  border-top: 1px solid var(--border);
+}
+
+.shot a.zoom {
+  display: block;
+  text-decoration: none;
+}
+
+.run-summary {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  margin-bottom: 0.8rem;
+  flex-wrap: wrap;
+}
+
+.run-meta {
+  color: var(--muted);
+  font-size: 0.8rem;
+  margin-bottom: 0.8rem;
+}
+
 ::selection {
   background: rgba(91, 140, 255, 0.4);
   color: #fff;

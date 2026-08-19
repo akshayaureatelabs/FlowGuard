@@ -1,15 +1,37 @@
 import { chromium, firefox, type Browser, type Page, type Locator } from "playwright";
 import path from "path";
 import fs from "fs";
+import pixelmatchRaw from "pixelmatch";
+import { PNG } from "pngjs";
+import AxeBuilder from "@axe-core/playwright";
 import type { Test, Environment, Step, StepResult, Module } from "@flowguard/shared";
 import { repo } from "./repo.js";
+import { trackRunFinished } from "./metrics.js";
 
-const ARTIFACTS_DIR =
+export const ARTIFACTS_DIR =
   process.env.ARTIFACTS_DIR || path.join(process.cwd(), "artifacts");
 const BASELINES_DIR = path.join(ARTIFACTS_DIR, "baselines");
 
+const pixelmatch = (pixelmatchRaw as any).default ?? pixelmatchRaw;
+
 function ensureDir(dir: string) {
   if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+}
+
+/** Convert an absolute artifact file path into a public URL served by the API. */
+export function artifactUrl(file: string): string {
+  if (!file) return file;
+  const base = path.resolve(ARTIFACTS_DIR);
+  const abs = path.resolve(file);
+  const rel = path.relative(base, abs);
+  if (rel.startsWith("..") || path.isAbsolute(rel)) return file;
+  return `/artifacts/${rel.split(path.sep).join("/")}`;
+}
+
+const AXE_TAGS: Record<string, string[]> = {
+  wcag2a: ["wcag2a"],
+  wcag2aa: ["wcag2a", "wcag2aa"],
+  wcag21aa: ["wcag2a", "wcag2aa", "wcag21aa"],
 }
 
 async function locate(
@@ -136,7 +158,7 @@ async function executeStep(
         } else {
           await page.screenshot({ path: file, fullPage: step.config.fullPage ?? false });
         }
-        return one({ status: "passed", screenshot: file });
+        return one({ status: "passed", screenshot: artifactUrl(file) });
       }
       case "javascript": {
         const code = interpolate(step.config.code, vars);
@@ -145,25 +167,29 @@ async function executeStep(
         break;
       }
       case "accessibility": {
-        const issues: string[] = [];
-        const imgs = await page.locator("img:not([alt])").count();
-        if (imgs > 0) issues.push(`${imgs} image(s) missing alt`);
-        const emptyButtons = await page
-          .locator("button:not([aria-label])")
-          .evaluateAll(
-            (nodes) => nodes.filter((n) => !(n as HTMLElement).innerText?.trim()).length
-          );
-        if (emptyButtons > 0)
-          issues.push(`${emptyButtons} button(s) without accessible name`);
-        if (issues.length) {
-          throw new Error(`A11y (${step.config.standard}): ${issues.join("; ")}`);
+        const standard = step.config.standard || "wcag2aa";
+        const builder = new AxeBuilder({ page }).withTags(AXE_TAGS[standard] || ["wcag2aa"]);
+        if (step.config.selector?.primary) {
+          builder.include(step.config.selector.primary);
         }
-        return one({ status: "passed", meta: { standard: step.config.standard, issues: [] } });
+        const results = await builder.analyze();
+        const violations = results.violations || [];
+        if (violations.length) {
+          const summary = violations
+            .slice(0, 5)
+            .map((v) => `${v.id} (${v.impact || "minor"})`)
+            .join(", ");
+          throw new Error(
+            `A11y (${standard}): ${violations.length} violation(s): ${summary}`
+          );
+        }
+        return one({ status: "passed", meta: { standard, violations: [] } });
       }
       case "visualAssert": {
         ensureDir(BASELINES_DIR);
         const baselinePath = path.join(BASELINES_DIR, `${step.config.baselineName}.png`);
         const currentPath = path.join(runDir, `visual-${step.id}.png`);
+        const diffPath = path.join(runDir, `visual-${step.id}-diff.png`);
         if (step.config.selector) {
           const loc = await locate(page, step.config.selector);
           await loc.screenshot({ path: currentPath });
@@ -177,30 +203,39 @@ async function executeStep(
           fs.copyFileSync(currentPath, baselinePath);
           return one({
             status: "passed",
-            screenshot: currentPath,
+            screenshot: artifactUrl(currentPath),
             meta: { baselineCreated: true, baselinePath },
           });
         }
-        const a = fs.readFileSync(baselinePath);
-        const b = fs.readFileSync(currentPath);
+        const a = PNG.sync.read(fs.readFileSync(baselinePath));
+        const b = PNG.sync.read(fs.readFileSync(currentPath));
         const threshold = step.config.threshold ?? 0.01;
-        if (a.length !== b.length) {
-          const diffRatio = Math.abs(a.length - b.length) / Math.max(a.length, b.length);
-          if (diffRatio > threshold) {
-            throw new Error(
-              `Visual diff detected (size delta ${(diffRatio * 100).toFixed(1)}%). Baseline: ${baselinePath}`
-            );
-          }
-        } else if (!a.equals(b)) {
-          const mismatch = a.reduce((n, byte, i) => n + (byte !== b[i] ? 1 : 0), 0);
-          const ratio = mismatch / a.length;
-          if (ratio > threshold) {
-            throw new Error(
-              `Visual diff ${(ratio * 100).toFixed(2)}% pixels differ (threshold ${(threshold * 100).toFixed(1)}%)`
-            );
-          }
+        if (a.width !== b.width || a.height !== b.height) {
+          throw new Error(
+            `Visual diff: dimensions differ ${a.width}x${a.height} vs ${b.width}x${b.height}`
+          );
         }
-        return one({ status: "passed", screenshot: currentPath, meta: { baselinePath } });
+        const diff = new PNG({ width: a.width, height: a.height });
+        const diffPixels = pixelmatch(
+          a.data,
+          b.data,
+          diff.data,
+          a.width,
+          a.height,
+          { threshold: 0.1 }
+        );
+        const ratio = diffPixels / (a.width * a.height);
+        if (ratio > threshold) {
+          fs.writeFileSync(diffPath, PNG.sync.write(diff));
+          throw new Error(
+            `Visual diff ${(ratio * 100).toFixed(2)}% pixels differ (threshold ${(threshold * 100).toFixed(1)}%). Diff: ${artifactUrl(diffPath)}`
+          );
+        }
+        return one({
+          status: "passed",
+          screenshot: artifactUrl(currentPath),
+          meta: { baselinePath, diffPixels, diffRatio: ratio },
+        });
       }
       case "module": {
         const mod = modules.get(step.config.moduleId);
@@ -220,14 +255,14 @@ async function executeStep(
 
     const shot = path.join(runDir, `${step.id}.png`);
     await page.screenshot({ path: shot }).catch(() => {});
-    return one({ status: "passed", screenshot: shot });
+    return one({ status: "passed", screenshot: artifactUrl(shot) });
   } catch (err: any) {
     const shot = path.join(runDir, `${step.id}-error.png`);
     await page.screenshot({ path: shot }).catch(() => {});
     return one({
       status: "failed",
       error: err?.message || String(err),
-      screenshot: shot,
+      screenshot: artifactUrl(shot),
     });
   }
 }
@@ -249,7 +284,9 @@ export async function runLocalTest(
   let browser: Browser | null = null;
   const results: StepResult[] = [];
   const moduleList = await repo.listModules(test.projectId);
-  const modules = new Map(moduleList.map((m) => [m.id, m] as const));
+  const modules = new Map<string, Module>(
+    moduleList.map((m: Module) => [m.id, m] as const)
+  );
   const vars = { ...(env.variables || {}) };
 
   try {
@@ -289,8 +326,9 @@ export async function runLocalTest(
       status: failed ? "failed" : "passed",
       finishedAt: new Date().toISOString(),
       stepsResults: results,
-      artifacts: { finalScreenshot: finalShot },
+      artifacts: { finalScreenshot: artifactUrl(finalShot) },
     });
+    trackRunFinished();
   } catch (err: any) {
     await repo.updateRun(runId, {
       status: "error",
@@ -298,6 +336,7 @@ export async function runLocalTest(
       finishedAt: new Date().toISOString(),
       stepsResults: results,
     });
+    trackRunFinished();
   } finally {
     if (browser) await browser.close();
   }

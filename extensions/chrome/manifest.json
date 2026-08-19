@@ -4,6 +4,13 @@
   "version": "0.1.0",
   "description": "Record browser actions and export FlowGuard test steps",
   "permissions": ["activeTab", "scripting", "storage"],
+  "host_permissions": [
+    "http://localhost:3001/*",
+    "http://127.0.0.1:3001/*",
+    "https://*.railway.app/*",
+    "https://*.up.railway.app/*",
+    "https://*.vercel.app/*"
+  ],
   "action": {
     "default_popup": "popup.html",
     "default_title": "FlowGuard Recorder"

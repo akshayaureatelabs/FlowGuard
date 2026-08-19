@@ -28,6 +28,13 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
   return res.json();
 }
 
+/** Resolve API-origin artifact paths (e.g. /artifacts/run/final.png) to an absolute URL. */
+export function resolveArtifact(url?: string): string | undefined {
+  if (!url) return url;
+  if (/^https?:\/\//i.test(url)) return url;
+  return `${API}${url.startsWith("/") ? url : `/${url}`}`;
+}
+
 export const api = {
   register: (data: { email: string; password: string; name?: string }) =>
     request<any>("/api/auth/register", { method: "POST", body: JSON.stringify(data) }),
@@ -76,6 +83,11 @@ export const api = {
   updateSteps: (testId: string, steps: any[]) =>
     request<any>(`/api/tests/${testId}/steps`, {
       method: "PUT",
+      body: JSON.stringify({ steps }),
+    }),
+  appendSteps: (testId: string, steps: any[]) =>
+    request<any>(`/api/tests/${testId}/steps`, {
+      method: "POST",
       body: JSON.stringify({ steps }),
     }),
 
