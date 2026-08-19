@@ -87,6 +87,9 @@ class MemoryAsync {
   listRuns(testId?: string) {
     return Promise.resolve(memoryStore.listRuns(testId));
   }
+  deleteRun(id: string) {
+    return Promise.resolve(memoryStore.deleteRun(id));
+  }
   createModule(projectId: string, name: string) {
     return Promise.resolve(memoryStore.createModule(projectId, name));
   }
@@ -134,6 +137,9 @@ class MemoryAsync {
   }
   listTeamsForUser(userId: string) {
     return Promise.resolve(memoryStore.listTeamsForUser(userId));
+  }
+  listTeams() {
+    return Promise.resolve(memoryStore.listTeams());
   }
   getTeam(id: string) {
     return Promise.resolve(memoryStore.getTeam(id));

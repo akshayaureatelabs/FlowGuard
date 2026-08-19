@@ -92,6 +92,10 @@ class MemoryStore {
       .map((t) => ({ team: t, role: roles.get(t.id)! }));
   }
 
+  listTeams(): Team[] {
+    return Array.from(this.teams.values());
+  }
+
   deleteTeam(id: string): boolean {
     if (!this.teams.has(id)) return false;
     this.teams.delete(id);
@@ -358,6 +362,10 @@ class MemoryStore {
   listRuns(testId?: string): TestRun[] {
     const all = Array.from(this.runs.values());
     return testId ? all.filter((r) => r.testId === testId) : all;
+  }
+
+  deleteRun(id: string): boolean {
+    return this.runs.delete(id);
   }
 
   // Modules

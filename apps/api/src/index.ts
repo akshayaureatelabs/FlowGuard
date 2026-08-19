@@ -38,6 +38,7 @@ import {
   AUTH_DISABLED,
 } from "./auth.js";
 import { openApiSpec } from "./openapi.js";
+import { adminRouter, requireAdminKey } from "./admin.js";
 import {
   trackRequest,
   trackRunStarted,
@@ -158,6 +159,9 @@ app.post("/api/auth/login", async (req, res) => {
 app.get("/api/auth/me", authMiddleware, (req, res) => {
   res.json({ user: req.user });
 });
+
+// ---- Admin panel (guarded by X-Admin-Key header) ----
+app.use("/api/admin", requireAdminKey, adminRouter);
 
 app.use("/api", authMiddleware);
 
@@ -686,6 +690,11 @@ async function start() {
     console.log(`database=${dbMode}`);
     console.log(`AUTH=${AUTH_DISABLED ? "disabled" : "enabled"}`);
     console.log(`USE_LOCAL_EXECUTION=${process.env.USE_LOCAL_EXECUTION ?? "true"}`);
+    if (!process.env.ADMIN_KEY) {
+      console.warn(
+        "[admin] ADMIN_KEY not set — using default 'flowguard-admin'. Set ADMIN_KEY in production."
+      );
+    }
   });
 }
 

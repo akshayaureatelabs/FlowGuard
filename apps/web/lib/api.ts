@@ -2,6 +2,17 @@ import { authHeaders, clearSession } from "./auth";
 
 const API = process.env.NEXT_PUBLIC_API_URL || "http://localhost:3001";
 
+const ADMIN_KEY_STORAGE = "fg_admin_key";
+
+export function getAdminKey(): string | null {
+  if (typeof window === "undefined") return null;
+  return localStorage.getItem(ADMIN_KEY_STORAGE);
+}
+
+export function setAdminKey(key: string): void {
+  localStorage.setItem(ADMIN_KEY_STORAGE, key);
+}
+
 async function request<T>(path: string, options?: RequestInit): Promise<T> {
   const res = await fetch(`${API}${path}`, {
     ...options,
@@ -159,4 +170,41 @@ export const api = {
     request<void>(`/api/teams/${teamId}/invites/${inviteId}`, { method: "DELETE" }),
   acceptInvite: (token: string) =>
     request<any>(`/api/invites/${token}/accept`, { method: "POST" }),
+
+  admin: {
+    config: () => adminRequest<any>("/api/admin/config"),
+    overview: () => adminRequest<any>("/api/admin/overview"),
+    projects: () => adminRequest<any[]>("/api/admin/projects"),
+    tests: () => adminRequest<any[]>("/api/admin/tests"),
+    runs: (limit?: number) =>
+      adminRequest<any[]>(`/api/admin/runs${limit ? `?limit=${limit}` : ""}`),
+    schedules: () => adminRequest<any[]>("/api/admin/schedules"),
+    teams: () => adminRequest<any[]>("/api/admin/teams"),
+    users: () => adminRequest<any[]>("/api/admin/users"),
+    deleteProject: (id: string) =>
+      adminRequest<void>(`/api/admin/projects/${id}`, { method: "DELETE" }),
+    deleteTest: (id: string) =>
+      adminRequest<void>(`/api/admin/tests/${id}`, { method: "DELETE" }),
+    deleteRun: (id: string) =>
+      adminRequest<void>(`/api/admin/runs/${id}`, { method: "DELETE" }),
+    deleteSchedule: (id: string) =>
+      adminRequest<void>(`/api/admin/schedules/${id}`, { method: "DELETE" }),
+    deleteTeam: (id: string) =>
+      adminRequest<void>(`/api/admin/teams/${id}`, { method: "DELETE" }),
+    deleteUser: (id: string) =>
+      adminRequest<void>(`/api/admin/users/${id}`, { method: "DELETE" }),
+    runTest: (testId: string, environmentId: string) =>
+      adminRequest<any>("/api/admin/run", {
+        method: "POST",
+        body: JSON.stringify({ testId, environmentId }),
+      }),
+  },
 };
+
+async function adminRequest<T>(path: string, options?: RequestInit): Promise<T> {
+  const key = getAdminKey() || "";
+  return request<T>(path, {
+    ...options,
+    headers: { "x-admin-key": key, ...(options?.headers || {}) },
+  });
+}

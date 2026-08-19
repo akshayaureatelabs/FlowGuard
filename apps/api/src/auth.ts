@@ -136,6 +136,59 @@ export function findUserById(id: string) {
   return findById(id);
 }
 
+export type AdminUser = {
+  id: string;
+  email: string;
+  name?: string | null;
+  apiKey?: string;
+  createdAt?: string;
+};
+
+export async function listUsers(): Promise<AdminUser[]> {
+  if (useMongo) {
+    const docs = await (await usersCol())
+      .find({})
+      .sort({ _id: 1 })
+      .toArray();
+    return docs.map((d: any) => {
+      const { _id, passwordHash, ...u } = d;
+      return u as AdminUser;
+    });
+  }
+  if (usePostgres) {
+    const rows = await getPrisma().user.findMany({ orderBy: { createdAt: "asc" } });
+    return rows.map((r: any) => ({
+      id: r.id,
+      email: r.email,
+      name: r.name,
+      apiKey: r.apiKey,
+      createdAt: r.createdAt ? new Date(r.createdAt).toISOString() : undefined,
+    }));
+  }
+  return [...memUsers.values()].map((u) => ({
+    id: u.id,
+    email: u.email,
+    name: u.name,
+    apiKey: u.apiKey,
+  }));
+}
+
+export async function deleteUser(id: string): Promise<boolean> {
+  if (useMongo) {
+    const r = await (await usersCol()).deleteOne({ id });
+    return r.deletedCount > 0;
+  }
+  if (usePostgres) {
+    try {
+      await getPrisma().user.delete({ where: { id } });
+      return true;
+    } catch {
+      return false;
+    }
+  }
+  return memUsers.delete(id);
+}
+
 declare global {
   namespace Express {
     interface Request {

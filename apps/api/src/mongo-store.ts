@@ -107,6 +107,9 @@ export class MongoStore {
       role: roles.get((stripId(t) as Team).id) as TeamRole,
     }));
   }
+  async listTeams(): Promise<Team[]> {
+    return (await (await col("teams")).find({}).toArray()).map(stripId) as Team[];
+  }
   async getTeam(id: string): Promise<Team | undefined> {
     const t = await (await col("teams")).findOne({ id });
     return t ? (stripId(t) as Team) : undefined;
@@ -327,6 +330,10 @@ export class MongoStore {
     return (
       await (await col("runs")).find(q).sort({ createdAt: -1 }).toArray()
     ).map(stripId) as TestRun[];
+  }
+  async deleteRun(id: string): Promise<boolean> {
+    const r = await (await col("runs")).deleteOne({ id });
+    return r.deletedCount > 0;
   }
 
   async createModule(projectId: string, name: string): Promise<Module> {

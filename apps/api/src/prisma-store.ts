@@ -191,6 +191,9 @@ export class PrismaStore {
       role: (t.members?.[0]?.role as TeamRole) ?? "member",
     }));
   }
+  async listTeams(): Promise<Team[]> {
+    return (await prisma().team.findMany({ orderBy: { createdAt: "desc" } })).map(mapTeam);
+  }
   async getTeam(id: string): Promise<Team | undefined> {
     const t = await prisma().team.findUnique({ where: { id } });
     return t ? mapTeam(t) : undefined;
@@ -440,6 +443,14 @@ export class PrismaStore {
       orderBy: { createdAt: "desc" },
     });
     return rows.map(mapRun);
+  }
+  async deleteRun(id: string): Promise<boolean> {
+    try {
+      await prisma().testRun.delete({ where: { id } });
+      return true;
+    } catch {
+      return false;
+    }
   }
 
   async createModule(projectId: string, name: string): Promise<Module> {

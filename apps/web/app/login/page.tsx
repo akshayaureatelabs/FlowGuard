@@ -45,8 +45,8 @@ export default function LoginPage() {
       <div className="page-header">
         <h1>{mode === "login" ? "Sign in" : "Create account"}</h1>
         <p>
-          JWT + API key auth. Local mode (`USE_DATABASE=false`) does not require
-          login for API calls.
+          Sign in to run, schedule, and monitor browser tests across your
+          team — no code required.
         </p>
       </div>
 

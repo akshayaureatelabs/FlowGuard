@@ -31,6 +31,7 @@ Browser extension ─▶ FlowGuard API (Express) ─▶ MongoDB Atlas
 | `DATABASE_URL` | — | Postgres connection string when `USE_DATABASE=postgres` (Prisma). |
 | `AUTH_DISABLED` | `true` | `false` to enable JWT login + API keys. **Set `false` in production.** |
 | `JWT_SECRET` | dev value | **Must be a long random secret in production.** |
+| `ADMIN_KEY` | `flowguard-admin` | Shared secret for the `/admin` panel (`X-Admin-Key` header). **Set a strong random value in production.** |
 | `USE_LOCAL_EXECUTION` | `true` | `false` to delegate runs to a remote runner. |
 | `PLAYWRIGHT_GRID_URL` | — | Optional Playwright/Selenium grid endpoint. `ws://`/`wss://` connects via Playwright, `http(s)://` via CDP. |
 | `ARTIFACTS_DIR` | `./artifacts` | Where screenshots/diffs/videos are stored. Use a persistent volume. |
