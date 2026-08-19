@@ -2,13 +2,13 @@ import jwt from "jsonwebtoken";
 import bcrypt from "bcryptjs";
 import type { Request, Response, NextFunction } from "express";
 import { v4 as uuid } from "uuid";
-import { useDatabase, getPrisma } from "./db.js";
+import { usePostgres, useMongo, useDatabase, getPrisma, getMongo } from "./db.js";
 
 const JWT_SECRET = process.env.JWT_SECRET || "dev-secret-change-me";
 
-/** Auth off when AUTH_DISABLED=true OR when not using database (local memory MVP). */
+/** Auth off when AUTH_DISABLED=true OR memory mode (no DB). */
 export const AUTH_DISABLED =
-  process.env.AUTH_DISABLED === "true" || process.env.USE_DATABASE !== "true";
+  process.env.AUTH_DISABLED === "true" || !useDatabase;
 
 export type AuthUser = {
   id: string;
@@ -27,8 +27,17 @@ type StoredUser = {
 
 const memUsers = new Map<string, StoredUser>();
 
+async function usersCol() {
+  const db = await getMongo();
+  return db.collection("users");
+}
+
 async function findByEmail(email: string): Promise<StoredUser | undefined> {
-  if (useDatabase) {
+  if (useMongo) {
+    const u = await (await usersCol()).findOne({ email });
+    return u ? strip(u) : undefined;
+  }
+  if (usePostgres) {
     const u = await getPrisma().user.findUnique({ where: { email } });
     return u || undefined;
   }
@@ -36,7 +45,11 @@ async function findByEmail(email: string): Promise<StoredUser | undefined> {
 }
 
 async function findByApiKey(apiKey: string): Promise<StoredUser | undefined> {
-  if (useDatabase) {
+  if (useMongo) {
+    const u = await (await usersCol()).findOne({ apiKey });
+    return u ? strip(u) : undefined;
+  }
+  if (usePostgres) {
     const u = await getPrisma().user.findUnique({ where: { apiKey } });
     return u || undefined;
   }
@@ -44,11 +57,20 @@ async function findByApiKey(apiKey: string): Promise<StoredUser | undefined> {
 }
 
 async function findById(id: string): Promise<StoredUser | undefined> {
-  if (useDatabase) {
+  if (useMongo) {
+    const u = await (await usersCol()).findOne({ id });
+    return u ? strip(u) : undefined;
+  }
+  if (usePostgres) {
     const u = await getPrisma().user.findUnique({ where: { id } });
     return u || undefined;
   }
   return memUsers.get(id);
+}
+
+function strip(doc: any): StoredUser {
+  const { _id, ...rest } = doc;
+  return rest as StoredUser;
 }
 
 export async function registerUser(email: string, password: string, name?: string) {
@@ -57,7 +79,19 @@ export async function registerUser(email: string, password: string, name?: strin
   const passwordHash = await bcrypt.hash(password, 10);
   const apiKey = uuid();
 
-  if (useDatabase) {
+  if (useMongo) {
+    const user: StoredUser = {
+      id: uuid(),
+      email,
+      passwordHash,
+      apiKey,
+      name: name || null,
+    };
+    await (await usersCol()).insertOne({ ...user });
+    return { id: user.id, email: user.email, apiKey: user.apiKey, name: user.name ?? undefined };
+  }
+
+  if (usePostgres) {
     const user = await getPrisma().user.create({
       data: { email, passwordHash, apiKey, name: name || null },
     });
@@ -123,7 +157,12 @@ export async function authMiddleware(req: Request, res: Response, next: NextFunc
     if (apiKeyHeader) {
       const user = await findByApiKey(apiKeyHeader);
       if (!user) return res.status(401).json({ error: "Invalid API key" });
-      req.user = { id: user.id, email: user.email, apiKey: user.apiKey, name: user.name ?? undefined };
+      req.user = {
+        id: user.id,
+        email: user.email,
+        apiKey: user.apiKey,
+        name: user.name ?? undefined,
+      };
       return next();
     }
 
