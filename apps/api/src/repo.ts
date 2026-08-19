@@ -1,5 +1,5 @@
 import { createRequire } from "module";
-import { useDatabase } from "./db.js";
+import { useMongo, usePostgres } from "./db.js";
 import { store as memoryStore } from "./store.js";
 import type {
   TestRun,
@@ -10,7 +10,7 @@ import type {
 
 const require = createRequire(import.meta.url);
 
-/** Unified async data access — Prisma when USE_DATABASE=true, else memory. */
+/** Unified async data access — mongo | postgres | memory. */
 class MemoryAsync {
   createProject(name: string) {
     return Promise.resolve(memoryStore.createProject(name));
@@ -129,7 +129,11 @@ class MemoryAsync {
 }
 
 function createRepo() {
-  if (useDatabase) {
+  if (useMongo) {
+    const { MongoStore } = require("./mongo-store.js");
+    return new MongoStore();
+  }
+  if (usePostgres) {
     const { PrismaStore } = require("./prisma-store.js");
     return new PrismaStore();
   }
