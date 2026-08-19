@@ -15,7 +15,7 @@ import {
   CreateScheduleBody,
   UpdateTestSettingsBody,
 } from "@flowguard/shared";
-import { useDatabase } from "./db.js";
+import { dbMode, useMongo, getMongo } from "./db.js";
 import { repo } from "./repo.js";
 import { runLocalTest } from "./local-runner.js";
 import {
@@ -55,7 +55,7 @@ app.get("/health", (_req, res) => {
     time: new Date().toISOString(),
     uptimeSec: m.uptimeSec,
     auth: AUTH_DISABLED ? "disabled" : "jwt+apiKey",
-    database: useDatabase ? "postgres" : "memory",
+    database: dbMode,
     metrics: m,
   });
 });
@@ -332,12 +332,27 @@ setInterval(async () => {
   }
 }, 30_000);
 
-app.listen(PORT, () => {
-  console.log(`FlowGuard API listening on http://localhost:${PORT}`);
-  console.log(`Docs: http://localhost:${PORT}/docs`);
-  console.log(`USE_DATABASE=${useDatabase} (${useDatabase ? "postgres" : "memory"})`);
-  console.log(`AUTH=${AUTH_DISABLED ? "disabled" : "enabled"}`);
-  console.log(`USE_LOCAL_EXECUTION=${process.env.USE_LOCAL_EXECUTION ?? "true"}`);
-});
+async function start() {
+  if (useMongo) {
+    try {
+      await getMongo();
+    } catch (err) {
+      console.error(
+        "[db] MongoDB connection failed. Install MongoDB locally or set MONGODB_URL (Atlas).",
+        err
+      );
+      process.exit(1);
+    }
+  }
+  app.listen(PORT, () => {
+    console.log(`FlowGuard API listening on http://localhost:${PORT}`);
+    console.log(`Docs: http://localhost:${PORT}/docs`);
+    console.log(`database=${dbMode}`);
+    console.log(`AUTH=${AUTH_DISABLED ? "disabled" : "enabled"}`);
+    console.log(`USE_LOCAL_EXECUTION=${process.env.USE_LOCAL_EXECUTION ?? "true"}`);
+  });
+}
+
+start();
 
 export { app };
