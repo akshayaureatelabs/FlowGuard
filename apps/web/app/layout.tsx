@@ -1,7 +1,5 @@
 import type { Metadata } from "next";
 import "./globals.css";
-import LaserFlow from "../components/LaserFlow";
-import MouseGlow from "../components/MouseGlow";
 
 export const metadata: Metadata = {
   title: "FlowGuard — Codeless browser testing",
@@ -21,8 +19,6 @@ export default function RootLayout({
     <html lang="en">
       <body>
         <div className="mesh-grid" aria-hidden />
-        <LaserFlow />
-        <MouseGlow />
         <header className="header">
           <div className="header-inner">
             <a href="/" className="logo">
