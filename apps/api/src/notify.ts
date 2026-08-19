@@ -18,6 +18,12 @@ type RunPayload = {
 
 const PUBLIC_URL = process.env.PUBLIC_URL || "";
 
+let alertStats = { attempts: 0, failures: 0, lastAt: undefined as string | undefined };
+
+export function getAlertStats() {
+  return { ...alertStats };
+}
+
 export async function buildAlertPayload(runId: string): Promise<RunPayload | null> {
   const run = await repo.getRun(runId);
   if (!run) return null;
@@ -135,18 +141,22 @@ export async function notifyForRun(runId: string): Promise<void> {
 
     await Promise.all(
       unique.map(async (s: Schedule) => {
+        alertStats = { ...alertStats, attempts: alertStats.attempts + 1 };
         const jobs: Promise<void>[] = [];
         if (s.notifyWebhook) {
           jobs.push(postWebhook(s.notifyWebhook, payload).catch((e) => {
             console.error(`[alerts] webhook failed for ${s.notifyWebhook}:`, e);
+            alertStats = { ...alertStats, failures: alertStats.failures + 1 };
           }));
         }
         if (s.notifyEmail) {
           jobs.push(sendEmail(s.notifyEmail, payload).catch((e) => {
             console.error(`[alerts] email failed for ${s.notifyEmail}:`, e);
+            alertStats = { ...alertStats, failures: alertStats.failures + 1 };
           }));
         }
         await Promise.all(jobs);
+        alertStats = { ...alertStats, lastAt: new Date().toISOString() };
       })
     );
   } catch (err) {

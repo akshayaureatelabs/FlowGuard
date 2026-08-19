@@ -3,7 +3,7 @@ import { repo } from "./repo.js";
 import { getMetrics } from "./metrics.js";
 import { listUsers, deleteUser, AUTH_DISABLED } from "./auth.js";
 import { runLocalTest } from "./local-runner.js";
-import { notifyForRun } from "./notify.js";
+import { notifyForRun, getAlertStats } from "./notify.js";
 import { trackRunStarted, trackRunFinished } from "./metrics.js";
 import { dbMode } from "./db.js";
 import type { Test, TestRun, Schedule, Team, Project } from "@flowguard/shared";
@@ -37,6 +37,68 @@ adminRouter.get("/overview", async (_req, res) => {
   const teams: Team[] = await repo.listTeams();
   const users = await listUsers();
   const metrics = getMetrics();
+  const { attempts, failures, lastAt } = await getAlertStats();
+
+  const finished = runs.filter(
+    (r) => r.status === "passed" || r.status === "failed" || r.status === "error"
+  );
+  const passedCount = runs.filter((r) => r.status === "passed").length;
+  const passRate = finished.length
+    ? Math.round((passedCount / finished.length) * 100)
+    : null;
+
+  const STUCK_MS = 10 * 60 * 1000;
+  const nowMs = Date.now();
+  const stuckRuns = runs.filter((r) => {
+    if (r.status !== "running" && r.status !== "queued") return false;
+    const t = new Date(r.startedAt || r.createdAt).getTime();
+    return nowMs - t > STUCK_MS;
+  });
+
+  const failingTests = tests
+    .map((t) => {
+      const truns = runs.filter((r) => r.testId === t.id);
+      const latest = truns[0];
+      return { t, latest };
+    })
+    .filter((x) => x.latest && (x.latest.status === "failed" || x.latest.status === "error"))
+    .map((x) => ({
+      id: x.t.id,
+      name: x.t.name,
+      projectName: projects.find((p) => p.id === x.t.projectId)?.name,
+      lastStatus: x.latest!.status,
+      lastRunAt: x.latest!.finishedAt || x.latest!.createdAt,
+    }))
+    .slice(0, 10);
+
+  const enabledSchedules = schedules.filter((s) => s.enabled);
+  const overdueSchedules = enabledSchedules.filter(
+    (s) => s.nextRunAt && new Date(s.nextRunAt).getTime() < nowMs
+  );
+  const lastStatusCounts = { passed: 0, failed: 0, error: 0 };
+  for (const s of enabledSchedules) {
+    if (s.lastRunStatus === "passed") lastStatusCounts.passed += 1;
+    else if (s.lastRunStatus === "failed") lastStatusCounts.failed += 1;
+    else if (s.lastRunStatus === "error") lastStatusCounts.error += 1;
+  }
+
+  const trendMap = new Map<string, { runs: number; passed: number; failed: number }>();
+  for (let i = 6; i >= 0; i--) {
+    const d = new Date();
+    d.setHours(0, 0, 0, 0);
+    d.setDate(d.getDate() - i);
+    trendMap.set(d.toISOString().slice(0, 10), { runs: 0, passed: 0, failed: 0 });
+  }
+  for (const r of runs) {
+    const day = (r.createdAt || "").slice(0, 10);
+    const bucket = trendMap.get(day);
+    if (!bucket) continue;
+    bucket.runs += 1;
+    if (r.status === "passed") bucket.passed += 1;
+    if (r.status === "failed" || r.status === "error") bucket.failed += 1;
+  }
+  const trend7d = [...trendMap.entries()].map(([date, v]) => ({ date, ...v }));
+
   res.json({
     counts: {
       projects: projects.length,
@@ -47,6 +109,23 @@ adminRouter.get("/overview", async (_req, res) => {
       users: users.length,
     },
     metrics,
+    passRate,
+    finishedRuns: finished.length,
+    stuckRuns: stuckRuns.map((r) => ({
+      id: r.id,
+      testName: tests.find((t) => t.id === r.testId)?.name,
+      status: r.status,
+      runningSince: r.startedAt || r.createdAt,
+    })),
+    failingTests,
+    scheduler: {
+      enabled: enabledSchedules.length,
+      total: schedules.length,
+      overdue: overdueSchedules.length,
+      lastRunStatusCounts: lastStatusCounts,
+    },
+    alerts: { attempts, failures, lastAt },
+    trend7d,
     recentRuns: runs.slice(0, 10).map(joinNames(projects, tests)),
   });
 });
