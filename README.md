@@ -1,108 +1,85 @@
 # FlowGuard
 
-Codeless browser test automation (Ghost Inspector–style) + nexus-dev production path.
+Codeless browser test automation (Ghost Inspector–style).
 
-## Recommended local setup (Postgres — data survives restart)
+## Recommended: MongoDB (no Docker)
 
-### 1. Start Postgres
+Data survives restart. No Docker required.
+
+### Option A — Local MongoDB (Windows)
+
+1. Install: https://www.mongodb.com/try/download/community  
+   (or `winget install MongoDB.Server`)
+2. Service start ho jaye (default port `27017`).
+
+### Option B — Free MongoDB Atlas (cloud)
+
+1. https://cloud.mongodb.com → free cluster  
+2. Database user + Network Access `0.0.0.0/0` (dev)  
+3. Connection string copy karo
+
+### Env
 
 ```cmd
-docker compose up -d postgres
+git pull
+copy /Y .env.example .env
 ```
 
-(Docker Desktop must be running on Windows.)
-
-### 2. Env
-
-```cmd
-copy .env.example .env
-```
-
-`.env` should have:
+`.env`:
 
 ```env
-USE_DATABASE=true
+USE_DATABASE=mongo
+MONGODB_URL=mongodb://127.0.0.1:27017/flowguard
 AUTH_DISABLED=true
-DATABASE_URL=postgresql://flowguard:flowguard@localhost:5432/flowguard?schema=public
 ```
 
-### 3. Install + schema
+Atlas:
+
+```env
+USE_DATABASE=mongo
+MONGODB_URL=mongodb+srv://USER:PASS@cluster0.xxxxx.mongodb.net/flowguard
+AUTH_DISABLED=true
+```
+
+### Run
 
 ```cmd
 npx pnpm install
-cd apps\api
-npx prisma generate
-npx prisma db push
-cd ..\..
-```
-
-### 4. Browsers + run
-
-```cmd
 cd apps\api
 npx playwright install chromium firefox
 cd ..\..
 npx pnpm dev
 ```
 
-- Web: http://localhost:3000  
-- Health: http://localhost:3001/health → `"database":"postgres"`  
-- Docs: http://localhost:3001/docs  
+Health check: http://localhost:3001/health → `"database":"mongo"`
 
-After this, **projects / tests / steps / runs stay in Postgres** — refresh or restart will not wipe them.
+Projects / tests / runs ab **refresh / restart pe nahi udhenge**.
 
 ---
 
-## Memory-only (no Docker)
+## Other modes
 
-```env
-USE_DATABASE=false
-AUTH_DISABLED=true
-```
-
-Data is lost when the API process restarts.
+| `USE_DATABASE` | Backend |
+|----------------|---------|
+| `mongo` | MongoDB (local / Atlas) — **recommended, no Docker** |
+| `true` | Postgres (Prisma) |
+| `false` | In-memory (data lost on restart) |
 
 ---
 
 ## Auth (optional)
 
-With Postgres:
-
 ```env
-USE_DATABASE=true
 AUTH_DISABLED=false
 JWT_SECRET=long-random-secret
 ```
 
-```http
-POST /api/auth/register { "email", "password", "name?" }
-POST /api/auth/login    { "email", "password" } → { token, user.apiKey }
-Authorization: Bearer <token>
-X-API-Key: <apiKey>
-```
-
-Users are stored in the `User` table when `USE_DATABASE=true`.
+Users store in Mongo `users` collection when `USE_DATABASE=mongo`.
 
 ---
 
-## Nexus-dev status
+## URLs
 
-| Module | Status |
-|--------|--------|
-| Auth (JWT + API key) | ✅ |
-| Postgres runtime (Prisma) | ✅ `USE_DATABASE=true` |
-| API tests (Vitest) | ✅ `pnpm test` |
-| E2E smoke | ✅ `apps/web/e2e` |
-| Docker Compose | ✅ |
-| GitHub Actions CI | ✅ |
-| OpenAPI + metrics | ✅ `/docs` `/metrics` `/health` |
-
-## Tests
-
-```cmd
-npx pnpm test
-```
-
-## Chrome recorder
-
-Load unpacked: `extensions/chrome`
+- Web: http://localhost:3000  
+- API: http://localhost:3001/health  
+- Docs: http://localhost:3001/docs  
