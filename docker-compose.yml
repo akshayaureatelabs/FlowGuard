@@ -22,7 +22,7 @@ services:
     environment:
       PORT: 3001
       DATABASE_URL: postgresql://flowguard:flowguard@postgres:5432/flowguard?schema=public
-      USE_DATABASE: "false"
+      USE_DATABASE: "true"
       USE_LOCAL_EXECUTION: "true"
       JWT_SECRET: change-me-in-production
       AUTH_DISABLED: "true"
