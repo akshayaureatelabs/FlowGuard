@@ -2,37 +2,71 @@
 
 Codeless browser test automation (Ghost Inspector–style) + nexus-dev production path.
 
-## Nexus-dev status
+## Recommended local setup (Postgres — data survives restart)
 
-| Module | Status |
-|--------|--------|
-| Auth (JWT + API key) | ✅ (`AUTH_DISABLED=true` for local) |
-| Postgres schema (Prisma) | ✅ (`USE_DATABASE=true` when ready) |
-| API tests (Vitest) | ✅ `pnpm test` |
-| E2E smoke (Playwright) | ✅ `apps/web/e2e` |
-| Docker Compose | ✅ |
-| GitHub Actions CI | ✅ |
-| OpenAPI + metrics | ✅ `/docs` `/metrics` `/health` |
+### 1. Start Postgres
 
-## Local (memory store, auth off)
+```cmd
+docker compose up -d postgres
+```
+
+(Docker Desktop must be running on Windows.)
+
+### 2. Env
 
 ```cmd
 copy .env.example .env
+```
+
+`.env` should have:
+
+```env
+USE_DATABASE=true
+AUTH_DISABLED=true
+DATABASE_URL=postgresql://flowguard:flowguard@localhost:5432/flowguard?schema=public
+```
+
+### 3. Install + schema
+
+```cmd
 npx pnpm install
-cd apps\api && npx playwright install chromium firefox && cd ..\..
+cd apps\api
+npx prisma generate
+npx prisma db push
+cd ..\..
+```
+
+### 4. Browsers + run
+
+```cmd
+cd apps\api
+npx playwright install chromium firefox
+cd ..\..
 npx pnpm dev
 ```
 
-- Web: http://localhost:3000
-- API health: http://localhost:3001/health
-- OpenAPI UI: http://localhost:3001/docs
-- Metrics: http://localhost:3001/metrics
+- Web: http://localhost:3000  
+- Health: http://localhost:3001/health → `"database":"postgres"`  
+- Docs: http://localhost:3001/docs  
 
-## Auth
+After this, **projects / tests / steps / runs stay in Postgres** — refresh or restart will not wipe them.
 
-When `USE_DATABASE=false` (default), `AUTH_DISABLED` is effectively on so the UI keeps working without tokens.
+---
 
-Enable auth for staging/prod:
+## Memory-only (no Docker)
+
+```env
+USE_DATABASE=false
+AUTH_DISABLED=true
+```
+
+Data is lost when the API process restarts.
+
+---
+
+## Auth (optional)
+
+With Postgres:
 
 ```env
 USE_DATABASE=true
@@ -44,32 +78,29 @@ JWT_SECRET=long-random-secret
 POST /api/auth/register { "email", "password", "name?" }
 POST /api/auth/login    { "email", "password" } → { token, user.apiKey }
 Authorization: Bearer <token>
-# or
 X-API-Key: <apiKey>
 ```
 
-## Postgres
+Users are stored in the `User` table when `USE_DATABASE=true`.
 
-```bash
-docker compose up -d postgres
-# set USE_DATABASE=true in .env
-cd apps/api && npx prisma db push
-```
+---
 
-> Note: runtime still uses the in-memory store until a full Prisma repository layer is wired; schema + migrate path is ready.
+## Nexus-dev status
+
+| Module | Status |
+|--------|--------|
+| Auth (JWT + API key) | ✅ |
+| Postgres runtime (Prisma) | ✅ `USE_DATABASE=true` |
+| API tests (Vitest) | ✅ `pnpm test` |
+| E2E smoke | ✅ `apps/web/e2e` |
+| Docker Compose | ✅ |
+| GitHub Actions CI | ✅ |
+| OpenAPI + metrics | ✅ `/docs` `/metrics` `/health` |
 
 ## Tests
 
-```bash
-pnpm test                          # API vitest
-# with web + api already running:
-cd apps/web && npx playwright test
-```
-
-## Docker
-
-```bash
-docker compose up --build
+```cmd
+npx pnpm test
 ```
 
 ## Chrome recorder
