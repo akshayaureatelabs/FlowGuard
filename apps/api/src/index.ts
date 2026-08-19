@@ -1,3 +1,4 @@
+import "./env.js";
 import express from "express";
 import cors from "cors";
 import helmet from "helmet";
@@ -14,6 +15,7 @@ import {
   CreateScheduleBody,
   UpdateTestSettingsBody,
 } from "@flowguard/shared";
+import { useDatabase } from "./db.js";
 import { repo } from "./repo.js";
 import { runLocalTest } from "./local-runner.js";
 import {
@@ -53,7 +55,7 @@ app.get("/health", (_req, res) => {
     time: new Date().toISOString(),
     uptimeSec: m.uptimeSec,
     auth: AUTH_DISABLED ? "disabled" : "jwt+apiKey",
-    database: process.env.USE_DATABASE === "true" ? "postgres" : "memory",
+    database: useDatabase ? "postgres" : "memory",
     metrics: m,
   });
 });
@@ -333,8 +335,8 @@ setInterval(async () => {
 app.listen(PORT, () => {
   console.log(`FlowGuard API listening on http://localhost:${PORT}`);
   console.log(`Docs: http://localhost:${PORT}/docs`);
-  console.log(`USE_DATABASE=${process.env.USE_DATABASE ?? "false"}`);
-  console.log(`AUTH=${AUTH_DISABLED ? "disabled (local)" : "enabled"}`);
+  console.log(`USE_DATABASE=${useDatabase} (${useDatabase ? "postgres" : "memory"})`);
+  console.log(`AUTH=${AUTH_DISABLED ? "disabled" : "enabled"}`);
   console.log(`USE_LOCAL_EXECUTION=${process.env.USE_LOCAL_EXECUTION ?? "true"}`);
 });
 
