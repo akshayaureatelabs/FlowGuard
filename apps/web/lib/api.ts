@@ -46,8 +46,8 @@ export const api = {
   createProject: (name: string) =>
     request<any>("/api/projects", { method: "POST", body: JSON.stringify({ name }) }),
   getProject: (id: string) => request<any>(`/api/projects/${id}`),
-  updateProject: (id: string, name: string) =>
-    request<any>(`/api/projects/${id}`, { method: "PUT", body: JSON.stringify({ name }) }),
+  updateProject: (id: string, data: { name?: string; notifyEmail?: string; notifyWebhook?: string; teamId?: string | null }) =>
+    request<any>(`/api/projects/${id}`, { method: "PUT", body: JSON.stringify(data) }),
   deleteProject: (id: string) =>
     request<void>(`/api/projects/${id}`, { method: "DELETE" }),
 
@@ -121,12 +121,42 @@ export const api = {
     testId: string;
     environmentId: string;
     intervalMinutes?: number;
+    cron?: string;
     notifyEmail?: string;
     notifyWebhook?: string;
+    maxRetries?: number;
   }) =>
     request<any>("/api/schedules", { method: "POST", body: JSON.stringify(data) }),
   updateSchedule: (id: string, data: any) =>
     request<any>(`/api/schedules/${id}`, { method: "PUT", body: JSON.stringify(data) }),
   deleteSchedule: (id: string) =>
     request<void>(`/api/schedules/${id}`, { method: "DELETE" }),
+
+  listTeams: () => request<any[]>("/api/teams"),
+  createTeam: (name: string) =>
+    request<any>("/api/teams", { method: "POST", body: JSON.stringify({ name }) }),
+  getTeam: (id: string) => request<any>(`/api/teams/${id}`),
+  addTeamMember: (teamId: string, userId: string, role: string) =>
+    request<any>(`/api/teams/${teamId}/members`, {
+      method: "POST",
+      body: JSON.stringify({ userId, role }),
+    }),
+  updateTeamMember: (teamId: string, userId: string, role: string) =>
+    request<any>(`/api/teams/${teamId}/members/${userId}`, {
+      method: "PUT",
+      body: JSON.stringify({ role }),
+    }),
+  removeTeamMember: (teamId: string, userId: string) =>
+    request<void>(`/api/teams/${teamId}/members/${userId}`, { method: "DELETE" }),
+  createTeamInvite: (teamId: string, email: string, role: string) =>
+    request<any>(`/api/teams/${teamId}/invites`, {
+      method: "POST",
+      body: JSON.stringify({ email, role }),
+    }),
+  listTeamInvites: (teamId: string) =>
+    request<any[]>(`/api/teams/${teamId}/invites`),
+  revokeTeamInvite: (teamId: string, inviteId: string) =>
+    request<void>(`/api/teams/${teamId}/invites/${inviteId}`, { method: "DELETE" }),
+  acceptInvite: (token: string) =>
+    request<any>(`/api/invites/${token}/accept`, { method: "POST" }),
 };

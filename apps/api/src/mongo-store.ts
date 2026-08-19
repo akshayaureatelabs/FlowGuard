@@ -1,7 +1,9 @@
 import { v4 as uuid } from "uuid";
 import { getMongo } from "./db.js";
+import { computeNextRunIso } from "./schedule.js";
 import type {
   Project,
+  ProjectPatch,
   Environment,
   Test,
   TestRun,
@@ -9,6 +11,10 @@ import type {
   Module,
   Schedule,
   TestSettings,
+  Team,
+  TeamMember,
+  TeamRole,
+  TeamInvite,
 } from "@flowguard/shared";
 
 async function col(name: string) {
@@ -42,10 +48,14 @@ export class MongoStore {
     const p = await (await col("projects")).findOne({ id });
     return p ? (stripId(p) as Project) : undefined;
   }
-  async updateProject(id: string, name: string): Promise<Project | undefined> {
+  async updateProject(id: string, patch: ProjectPatch): Promise<Project | undefined> {
+    const $set: Record<string, unknown> = { ...patch, updatedAt: now() };
+    if (patch.name === undefined) delete $set.name;
+    if (patch.notifyEmail === undefined) delete $set.notifyEmail;
+    if (patch.notifyWebhook === undefined) delete $set.notifyWebhook;
     const r = await (await col("projects")).findOneAndUpdate(
       { id },
-      { $set: { name, updatedAt: now() } },
+      { $set },
       { returnDocument: "after" }
     );
     return r ? (stripId(r) as Project) : undefined;
@@ -56,6 +66,139 @@ export class MongoStore {
     await (await col("modules")).deleteMany({ projectId: id });
     const r = await (await col("projects")).deleteOne({ id });
     return r.deletedCount > 0;
+  }
+
+  // Teams
+  async createTeam(name: string, ownerUserId: string): Promise<Team> {
+    const team: Team = {
+      id: uuid(),
+      name,
+      createdBy: ownerUserId,
+      createdAt: now(),
+      updatedAt: now(),
+    };
+    await (await col("teams")).insertOne({ ...team });
+    const memberId = uuid();
+    await (await col("teamMembers")).insertOne({
+      id: memberId,
+      teamId: team.id,
+      userId: ownerUserId,
+      role: "owner",
+      createdAt: now(),
+    });
+    return team;
+  }
+  async listTeamsForUser(userId: string): Promise<{ team: Team; role: TeamRole }[]> {
+    const members = await (await col("teamMembers"))
+      .find({ userId })
+      .toArray();
+    const teamIds = members.map(stripId as any).map((m: TeamMember) => m.teamId);
+    const teams = await (await col("teams"))
+      .find({ id: { $in: teamIds } })
+      .toArray();
+    const roles = new Map(
+      members.map((m: any) => {
+        const mm = stripId(m) as TeamMember;
+        return [mm.teamId, mm.role] as const;
+      })
+    );
+    return teams.map((t: any) => ({
+      team: stripId(t) as Team,
+      role: roles.get((stripId(t) as Team).id) as TeamRole,
+    }));
+  }
+  async getTeam(id: string): Promise<Team | undefined> {
+    const t = await (await col("teams")).findOne({ id });
+    return t ? (stripId(t) as Team) : undefined;
+  }
+  async deleteTeam(id: string): Promise<boolean> {
+    const r = await (await col("teams")).deleteOne({ id });
+    await (await col("teamMembers")).deleteMany({ teamId: id });
+    await (await col("invites")).deleteMany({ teamId: id });
+    await (await col("projects")).updateMany({ teamId: id }, { $unset: { teamId: "" } });
+    return r.deletedCount > 0;
+  }
+  async listTeamMembers(teamId: string): Promise<TeamMember[]> {
+    return (
+      await (await col("teamMembers")).find({ teamId }).toArray()
+    ).map(stripId) as TeamMember[];
+  }
+  async getTeamMember(teamId: string, userId: string): Promise<TeamMember | undefined> {
+    const m = await (await col("teamMembers")).findOne({ teamId, userId });
+    return m ? (stripId(m) as TeamMember) : undefined;
+  }
+  async isTeamMember(teamId: string, userId: string): Promise<boolean> {
+    return !!(await this.getTeamMember(teamId, userId));
+  }
+  async addTeamMember(
+    teamId: string,
+    userId: string,
+    role: TeamRole = "member"
+  ): Promise<TeamMember> {
+    const m: TeamMember = { id: uuid(), teamId, userId, role, createdAt: now() };
+    await (await col("teamMembers")).insertOne({ ...m });
+    return m;
+  }
+  async updateTeamMember(
+    teamId: string,
+    userId: string,
+    role: TeamRole
+  ): Promise<TeamMember | undefined> {
+    const r = await (await col("teamMembers")).findOneAndUpdate(
+      { teamId, userId },
+      { $set: { role } },
+      { returnDocument: "after" }
+    );
+    return r ? (stripId(r) as TeamMember) : undefined;
+  }
+  async removeTeamMember(teamId: string, userId: string): Promise<boolean> {
+    const r = await (await col("teamMembers")).deleteOne({ teamId, userId });
+    return r.deletedCount > 0;
+  }
+  async createInvite(
+    teamId: string,
+    email: string,
+    role: TeamRole,
+    createdBy: string
+  ): Promise<TeamInvite> {
+    const invite: TeamInvite = {
+      id: uuid(),
+      teamId,
+      email,
+      role,
+      token: uuid().replace(/-/g, "").slice(0, 24),
+      status: "pending",
+      createdBy,
+      expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString(),
+      createdAt: now(),
+    };
+    await (await col("invites")).insertOne({ ...invite });
+    return invite;
+  }
+  async listInvites(teamId: string): Promise<TeamInvite[]> {
+    return (
+      await (await col("invites")).find({ teamId }).sort({ createdAt: -1 }).toArray()
+    ).map(stripId) as TeamInvite[];
+  }
+  async getInviteByToken(token: string): Promise<TeamInvite | undefined> {
+    const i = await (await col("invites")).findOne({ token });
+    return i ? (stripId(i) as TeamInvite) : undefined;
+  }
+  async acceptInvite(token: string, userId: string): Promise<TeamMember | undefined> {
+    const invite = await this.getInviteByToken(token);
+    if (!invite || invite.status !== "pending") return undefined;
+    if (new Date(invite.expiresAt).getTime() < Date.now()) return undefined;
+    await (await col("invites")).updateOne({ id: invite.id }, { $set: { status: "accepted" } });
+    const existing = await this.getTeamMember(invite.teamId, userId);
+    if (existing) return existing;
+    return this.addTeamMember(invite.teamId, userId, invite.role);
+  }
+  async revokeInvite(teamId: string, inviteId: string): Promise<boolean> {
+    const r = await (await col("invites")).updateOne(
+      { id: inviteId, teamId },
+      { $set: { status: "revoked" } }
+    );
+    return r.modifiedCount > 0;
   }
 
   async createEnvironment(
@@ -228,6 +371,7 @@ export class MongoStore {
     notifyEmail?: string;
     notifyWebhook?: string;
     enabled?: boolean;
+    maxRetries?: number;
   }): Promise<Schedule> {
     const interval = data.intervalMinutes || 60;
     const s: Schedule = {
@@ -239,7 +383,10 @@ export class MongoStore {
       cron: data.cron,
       notifyEmail: data.notifyEmail,
       notifyWebhook: data.notifyWebhook,
-      nextRunAt: new Date(Date.now() + interval * 60_000).toISOString(),
+      maxRetries: data.maxRetries ?? 1,
+      retryCount: 0,
+      runsCount: 0,
+      nextRunAt: computeNextRunIso(data.cron, interval),
       createdAt: now(),
       updatedAt: now(),
     };

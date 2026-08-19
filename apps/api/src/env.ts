@@ -1,8 +1,7 @@
 import dotenv from "dotenv";
 import path from "path";
-import { fileURLToPath } from "url";
 
-const here = path.dirname(fileURLToPath(import.meta.url));
+const here = __dirname;
 // apps/api/src → monorepo root
 const root = path.resolve(here, "../../..");
 

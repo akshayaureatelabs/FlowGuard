@@ -17,6 +17,10 @@ export default function ProjectPage() {
   const [testName, setTestName] = useState("");
   const [moduleName, setModuleName] = useState("");
   const [error, setError] = useState("");
+  const [notifyEmail, setNotifyEmail] = useState("");
+  const [notifyWebhook, setNotifyWebhook] = useState("");
+  const [teamId, setTeamId] = useState("");
+  const [teams, setTeams] = useState<any[]>([]);
   const [editingEnvId, setEditingEnvId] = useState<string | null>(null);
   const [editEnvName, setEditEnvName] = useState("");
   const [editEnvUrl, setEditEnvUrl] = useState("");
@@ -36,6 +40,10 @@ export default function ProjectPage() {
       setEnvs(e);
       setTests(t);
       setModules(m);
+      setNotifyEmail(p?.notifyEmail || "");
+      setNotifyWebhook(p?.notifyWebhook || "");
+      setTeamId(p?.teamId || "");
+      setTeams(await api.listTeams());
     } catch (err: any) {
       setError(err.message);
     }
@@ -144,6 +152,20 @@ export default function ProjectPage() {
     }
   };
 
+  const saveAlerts = async () => {
+    try {
+      setError("");
+      const p = await api.updateProject(projectId, {
+        notifyEmail: notifyEmail.trim() || undefined,
+        notifyWebhook: notifyWebhook.trim() || undefined,
+        teamId: teamId || null,
+      });
+      setProject(p);
+    } catch (err: any) {
+      setError(err.message);
+    }
+  };
+
   if (!project && !error) return <p className="muted">Loading…</p>;
   if (error && !project) return <div className="alert-error">{error}</div>;
 
@@ -160,6 +182,52 @@ export default function ProjectPage() {
       </div>
 
       {error && <div className="alert-error">{error}</div>}
+
+      <h2>Alerts & Team</h2>
+      <div className="panel-box">
+        <p className="muted" style={{ marginTop: 0 }}>
+          Receive notifications for any failed run in this project — merges with
+          per-schedule alert settings. Assigning a team shares access with its
+          members.
+        </p>
+        <div className="form-row" style={{ marginBottom: 0 }}>
+          <div className="field" style={{ flex: 1 }}>
+            <label>Notify email</label>
+            <input
+              type="email"
+              value={notifyEmail}
+              onChange={(e) => setNotifyEmail(e.target.value)}
+              placeholder="team@example.com"
+              style={{ width: "100%", minWidth: 200 }}
+            />
+          </div>
+          <div className="field" style={{ flex: 1 }}>
+            <label>Notify webhook URL</label>
+            <input
+              type="url"
+              value={notifyWebhook}
+              onChange={(e) => setNotifyWebhook(e.target.value)}
+              placeholder="https://hooks.slack.com/services/..."
+              style={{ width: "100%", minWidth: 200 }}
+            />
+          </div>
+          <div className="field" style={{ flex: 1 }}>
+            <label>Team</label>
+            <select value={teamId} onChange={(e) => setTeamId(e.target.value)} style={{ width: "100%" }}>
+              <option value="">— Personal (owner only) —</option>
+              {teams.map((t: any) => (
+                <option key={t.team.id} value={t.team.id}>
+                  {t.team.name}
+                </option>
+              ))}
+            </select>
+          </div>
+          <div className="field">
+            <label>&nbsp;</label>
+            <button className="btn" onClick={saveAlerts}>Save</button>
+          </div>
+        </div>
+      </div>
 
       <h2>Environments</h2>
       <div className="panel-box">

@@ -88,7 +88,8 @@ async function sendEmail(recipient: string, payload: RunPayload): Promise<void> 
 
 /**
  * Deliver alerts for a finished run. Only runs that ended in a failed/error state
- * trigger notifications (matches schedule.notifyEmail / notifyWebhook).
+ * trigger notifications. Targets = schedule-level notifyEmail/notifyWebhook merged
+ * with project-level notifyEmail/notifyWebhook (tests can inherit project alerts).
  */
 export async function notifyForRun(runId: string): Promise<void> {
   try {
@@ -96,17 +97,44 @@ export async function notifyForRun(runId: string): Promise<void> {
     if (!run) return;
     if (run.status === "passed" || run.status === "queued" || run.status === "running") return;
 
-    const schedules = await repo.listSchedules(run.testId);
-    const targets = schedules.filter(
+    const test = await repo.getTest(run.testId);
+    const project = test ? await repo.getProject(test.projectId) : undefined;
+
+    const scheduleTargets = (await repo.listSchedules(run.testId)).filter(
       (s: Schedule) => s.enabled && (s.notifyEmail || s.notifyWebhook)
     );
+    const targets = [...scheduleTargets];
+    if (
+      project?.notifyEmail ||
+      project?.notifyWebhook
+    ) {
+      targets.push({
+        id: "project",
+        testId: run.testId,
+        environmentId: run.environmentId,
+        notifyEmail: project.notifyEmail,
+        notifyWebhook: project.notifyWebhook,
+        enabled: true,
+        createdAt: project.createdAt,
+        updatedAt: project.updatedAt,
+      } as unknown as Schedule);
+    }
     if (!targets.length) return;
 
     const payload = await buildAlertPayload(runId);
     if (!payload) return;
 
+    // Dedup identical delivery pairs (e.g. schedule + project pointing at same URL).
+    const seen = new Set<string>();
+    const unique = targets.filter((s: Schedule) => {
+      const key = `${s.notifyEmail || ""}|${s.notifyWebhook || ""}`;
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+
     await Promise.all(
-      targets.map(async (s: Schedule) => {
+      unique.map(async (s: Schedule) => {
         const jobs: Promise<void>[] = [];
         if (s.notifyWebhook) {
           jobs.push(postWebhook(s.notifyWebhook, payload).catch((e) => {

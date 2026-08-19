@@ -33,10 +33,13 @@ export default function TestEditorPage() {
   const [error, setError] = useState("");
   const [msg, setMsg] = useState("");
   const [browser, setBrowser] = useState("chrome");
+  const [remoteUrl, setRemoteUrl] = useState("");
   const [vw, setVw] = useState(1280);
   const [vh, setVh] = useState(720);
   const [schedules, setSchedules] = useState<any[]>([]);
   const [intervalMin, setIntervalMin] = useState(60);
+  const [cronExp, setCronExp] = useState("");
+  const [maxRetries, setMaxRetries] = useState(1);
   const [notifyEmail, setNotifyEmail] = useState("");
   const [notifyWebhook, setNotifyWebhook] = useState("");
   const [importJson, setImportJson] = useState("");
@@ -52,6 +55,7 @@ export default function TestEditorPage() {
       setTest(t);
       setSteps(t.steps || []);
       setBrowser(t.settings?.browser || "chrome");
+      setRemoteUrl(t.settings?.remoteUrl || "");
       setVw(t.settings?.viewport?.width || 1280);
       setVh(t.settings?.viewport?.height || 720);
       setSchedules(sch);
@@ -76,6 +80,7 @@ export default function TestEditorPage() {
     try {
       await api.updateTestSettings(testId, {
         browser,
+        remoteUrl: remoteUrl.trim() || undefined,
         viewport: { width: vw, height: vh },
       });
       const updated = await api.updateSteps(testId, steps);
@@ -128,6 +133,7 @@ export default function TestEditorPage() {
     try {
       await api.updateTestSettings(testId, {
         browser,
+        remoteUrl: remoteUrl.trim() || undefined,
         viewport: { width: vw, height: vh },
       });
       await api.updateSteps(testId, steps);
@@ -161,10 +167,16 @@ export default function TestEditorPage() {
         testId,
         environmentId: envId,
         intervalMinutes: intervalMin,
+        cron: cronExp.trim() || undefined,
+        maxRetries,
         notifyEmail: notifyEmail || undefined,
         notifyWebhook: notifyWebhook || undefined,
       });
-      setMsg(`Schedule every ${intervalMin} min created`);
+      setMsg(
+        cronExp.trim()
+          ? `Schedule created (cron ${cronExp.trim()})`
+          : `Schedule every ${intervalMin} min created`
+      );
       await load();
     } catch (err: any) {
       setError(err.message);
@@ -227,7 +239,22 @@ export default function TestEditorPage() {
             <select value={browser} onChange={(e) => setBrowser(e.target.value)}>
               <option value="chrome">Chrome</option>
               <option value="firefox">Firefox</option>
+              <option value="edge">Edge</option>
+              <option value="safari">Safari (WebKit)</option>
             </select>
+            <p className="muted" style={{ margin: "4px 0 0", fontSize: "0.8rem" }}>
+              Safari requires WebKit — install once with <code>pnpm exec playwright install webkit</code>.
+              Use a remote Playwright grid via the API env <code>PLAYWRIGHT_GRID_URL</code>.
+            </p>
+          </div>
+          <div className="field" style={{ flex: 1 }}>
+            <label>Remote Playwright grid (optional)</label>
+            <input
+              value={remoteUrl}
+              onChange={(e) => setRemoteUrl(e.target.value)}
+              placeholder="ws://grid.example.com or http://127.0.0.1:9222"
+              style={{ width: "100%", minWidth: 180 }}
+            />
           </div>
           <div className="field">
             <label>Viewport W</label>
@@ -296,6 +323,24 @@ export default function TestEditorPage() {
               onChange={(e) => setIntervalMin(Number(e.target.value))}
             />
           </div>
+          <div className="field">
+            <label>Cron (optional)</label>
+            <input
+              value={cronExp}
+              onChange={(e) => setCronExp(e.target.value)}
+              placeholder="0 9 * * 1-5"
+              title="Overrides the minute interval. 5 fields: minute hour day month weekday."
+            />
+          </div>
+          <div className="field">
+            <label>Max retries</label>
+            <input
+              type="number"
+              min={0}
+              value={maxRetries}
+              onChange={(e) => setMaxRetries(Number(e.target.value))}
+            />
+          </div>
           <div className="field" style={{ flex: 1 }}>
             <label>Notify email (optional)</label>
             <input
@@ -331,13 +376,23 @@ export default function TestEditorPage() {
           style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, flexWrap: "wrap" }}
         >
           <div>
-            <strong>Every {s.intervalMinutes} min</strong>
+            <strong>
+              {s.cron ? `Cron ${s.cron}` : `Every ${s.intervalMinutes} min`}
+            </strong>
             <div className="muted">
               {s.enabled ? "Enabled" : "Paused"}
+              {` · ${s.runsCount ?? 0} run${(s.runsCount ?? 0) === 1 ? "" : "s"}`}
+              {s.lastRunStatus && (
+                <span style={s.lastRunStatus === "passed" ? { color: "var(--success, green)" } : { color: "var(--danger)" }}>
+                  {` · last ${s.lastRunStatus}`}
+                </span>
+              )}
+              {s.retryCount > 0 && ` · retrying ${s.retryCount}/${s.maxRetries ?? 1}`}
               {s.notifyEmail && ` · ${s.notifyEmail}`}
               {s.notifyWebhook && " · webhook"}
               {s.nextRunAt && ` · next ${new Date(s.nextRunAt).toLocaleString()}`}
             </div>
+            {s.lastError && <div className="muted" style={{ fontSize: "0.85rem" }}>{s.lastError}</div>}
           </div>
           <div style={{ display: "flex", gap: 8 }}>
             <button className="btn btn-ghost btn-sm" onClick={() => toggleSchedule(s.id, s.enabled)}>
@@ -443,6 +498,13 @@ export default function TestEditorPage() {
                         {r.error && (
                           <div className="muted" style={{ color: "var(--danger)", marginTop: 2 }}>
                             {r.error}
+                          </div>
+                        )}
+                        {r.meta?.healed && (
+                          <div className="muted" style={{ color: "var(--warning, #b45309)", marginTop: 2 }}>
+                            <span className="badge">healed</span>{" "}
+                            {r.meta.healed.from} → {r.meta.healed.to}
+                            <span className="muted"> ({r.meta.healed.reason})</span>
                           </div>
                         )}
                       </div>

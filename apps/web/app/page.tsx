@@ -48,7 +48,7 @@ export default function HomePage() {
     if (!editingId || !editName.trim()) return;
     try {
       setError("");
-      await api.updateProject(editingId, editName.trim());
+      await api.updateProject(editingId, { name: editName.trim() });
       setEditingId(null);
       setEditName("");
       await load();

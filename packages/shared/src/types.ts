@@ -168,6 +168,12 @@ export const ProjectSchema = z.object({
   id: z.string(),
   name: z.string().min(1),
   ownerId: z.string().optional(),
+  /** When set, the project belongs to a team; team members share access. */
+  teamId: z.string().optional(),
+  /** Project-level alert email (single address). */
+  notifyEmail: z.string().email().optional(),
+  /** Project-level alert webhook URL. */
+  notifyWebhook: z.string().url().optional(),
   createdAt: z.string(),
   updatedAt: z.string(),
 });
@@ -186,6 +192,8 @@ export type Environment = z.infer<typeof EnvironmentSchema>;
 
 export const TestSettingsSchema = z.object({
   browser: z.enum(["chrome", "firefox", "edge", "safari"]).optional(),
+  /** Playwright grid / remote endpoint. ws://wss:// → connect(), http(s):// → CDP. */
+  remoteUrl: z.string().optional(),
   viewport: z
     .object({
       width: z.number().int().positive(),
@@ -227,6 +235,13 @@ export const ScheduleSchema = z.object({
   cron: z.string().optional(),
   notifyEmail: z.string().optional(),
   notifyWebhook: z.string().optional(),
+  /** Number of automatic retries after a failed scheduled run (default 1). */
+  maxRetries: z.number().int().min(0).optional(),
+  /** Current retry attempt for the most recent failed run. */
+  retryCount: z.number().int().min(0).optional(),
+  lastRunStatus: z.enum(["passed", "failed", "error"]).optional(),
+  lastError: z.string().optional(),
+  runsCount: z.number().int().min(0).optional(),
   lastRunAt: z.string().optional(),
   nextRunAt: z.string().optional(),
   createdAt: z.string(),
@@ -264,7 +279,69 @@ export const TestRunSchema = z.object({
 });
 export type TestRun = z.infer<typeof TestRunSchema>;
 
-export const CreateProjectBody = z.object({ name: z.string().min(1) });
+export const CreateProjectBody = z.object({
+  name: z.string().min(1),
+  teamId: z.string().optional(),
+});
+export const UpdateProjectBody = z
+  .object({
+    name: z.string().min(1).optional(),
+    notifyEmail: z.string().email().optional(),
+    notifyWebhook: z.string().url().optional(),
+    teamId: z.string().nullish(),
+  })
+  .partial();
+export type ProjectPatch = {
+  name?: string;
+  notifyEmail?: string;
+  notifyWebhook?: string;
+  teamId?: string | null;
+};
+
+export const TeamRoleSchema = z.enum(["owner", "admin", "member"]);
+export type TeamRole = z.infer<typeof TeamRoleSchema>;
+
+export const TeamSchema = z.object({
+  id: z.string(),
+  name: z.string().min(1),
+  createdBy: z.string(),
+  createdAt: z.string(),
+  updatedAt: z.string(),
+});
+export type Team = z.infer<typeof TeamSchema>;
+
+export const TeamMemberSchema = z.object({
+  id: z.string(),
+  teamId: z.string(),
+  userId: z.string(),
+  role: TeamRoleSchema,
+  createdAt: z.string(),
+});
+export type TeamMember = z.infer<typeof TeamMemberSchema>;
+
+export const TeamInviteSchema = z.object({
+  id: z.string(),
+  teamId: z.string(),
+  email: z.string().email(),
+  role: TeamRoleSchema,
+  token: z.string(),
+  status: z.enum(["pending", "accepted", "revoked"]).default("pending"),
+  createdBy: z.string(),
+  expiresAt: z.string(),
+  createdAt: z.string(),
+});
+export type TeamInvite = z.infer<typeof TeamInviteSchema>;
+
+export const CreateTeamBody = z.object({ name: z.string().min(1) });
+export const AddTeamMemberBody = z.object({
+  userId: z.string().min(1),
+  role: TeamRoleSchema.default("member"),
+});
+export const UpdateMemberRoleBody = z.object({ role: TeamRoleSchema });
+export const CreateTeamInviteBody = z.object({
+  email: z.string().email(),
+  role: TeamRoleSchema.default("member"),
+});
 export const CreateEnvironmentBody = z.object({
   name: z.string().min(1),
   baseUrl: z.string().min(1),
@@ -282,5 +359,6 @@ export const CreateScheduleBody = z.object({
   notifyEmail: z.string().optional(),
   notifyWebhook: z.string().optional(),
   enabled: z.boolean().optional(),
+  maxRetries: z.number().int().min(0).optional(),
 });
 export const UpdateTestSettingsBody = TestSettingsSchema;

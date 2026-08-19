@@ -3,13 +3,14 @@ import { useMongo, usePostgres } from "./db.js";
 import { store as memoryStore } from "./store.js";
 import type {
   Project,
+  ProjectPatch,
   TestRun,
   Step,
   Schedule,
   TestSettings,
 } from "@flowguard/shared";
 
-const require = createRequire(import.meta.url);
+const nodeRequire = createRequire(__filename);
 
 /** Unified async data access — mongo | postgres | memory. */
 class MemoryAsync {
@@ -22,8 +23,8 @@ class MemoryAsync {
   getProject(id: string) {
     return Promise.resolve(memoryStore.getProject(id));
   }
-  updateProject(id: string, name: string) {
-    return Promise.resolve(memoryStore.updateProject(id, name));
+  updateProject(id: string, patch: ProjectPatch) {
+    return Promise.resolve(memoryStore.updateProject(id, patch));
   }
   deleteProject(id: string) {
     return Promise.resolve(memoryStore.deleteProject(id));
@@ -109,6 +110,7 @@ class MemoryAsync {
     notifyEmail?: string;
     notifyWebhook?: string;
     enabled?: boolean;
+    maxRetries?: number;
   }) {
     return Promise.resolve(memoryStore.createSchedule(data));
   }
@@ -127,15 +129,65 @@ class MemoryAsync {
   dueSchedules() {
     return Promise.resolve(memoryStore.dueSchedules());
   }
+  createTeam(name: string, ownerUserId: string) {
+    return Promise.resolve(memoryStore.createTeam(name, ownerUserId));
+  }
+  listTeamsForUser(userId: string) {
+    return Promise.resolve(memoryStore.listTeamsForUser(userId));
+  }
+  getTeam(id: string) {
+    return Promise.resolve(memoryStore.getTeam(id));
+  }
+  deleteTeam(id: string) {
+    return Promise.resolve(memoryStore.deleteTeam(id));
+  }
+  listTeamMembers(teamId: string) {
+    return Promise.resolve(memoryStore.listTeamMembers(teamId));
+  }
+  getTeamMember(teamId: string, userId: string) {
+    return Promise.resolve(memoryStore.getTeamMember(teamId, userId));
+  }
+  isTeamMember(teamId: string, userId: string) {
+    return Promise.resolve(memoryStore.isTeamMember(teamId, userId));
+  }
+  addTeamMember(teamId: string, userId: string, role: import("@flowguard/shared").TeamRole) {
+    return Promise.resolve(memoryStore.addTeamMember(teamId, userId, role));
+  }
+  updateTeamMember(teamId: string, userId: string, role: import("@flowguard/shared").TeamRole) {
+    return Promise.resolve(memoryStore.updateTeamMember(teamId, userId, role));
+  }
+  removeTeamMember(teamId: string, userId: string) {
+    return Promise.resolve(memoryStore.removeTeamMember(teamId, userId));
+  }
+  createInvite(
+    teamId: string,
+    email: string,
+    role: import("@flowguard/shared").TeamRole,
+    createdBy: string
+  ) {
+    return Promise.resolve(memoryStore.createInvite(teamId, email, role, createdBy));
+  }
+  listInvites(teamId: string) {
+    return Promise.resolve(memoryStore.listInvites(teamId));
+  }
+  getInviteByToken(token: string) {
+    return Promise.resolve(memoryStore.getInviteByToken(token));
+  }
+  acceptInvite(token: string, userId: string) {
+    return Promise.resolve(memoryStore.acceptInvite(token, userId));
+  }
+  revokeInvite(teamId: string, inviteId: string) {
+    return Promise.resolve(memoryStore.revokeInvite(teamId, inviteId));
+  }
 }
 
 function createRepo() {
   if (useMongo) {
-    const { MongoStore } = require("./mongo-store.js");
+    const { MongoStore } = nodeRequire("./mongo-store.js");
     return new MongoStore();
   }
   if (usePostgres) {
-    const { PrismaStore } = require("./prisma-store.js");
+    const { PrismaStore } = nodeRequire("./prisma-store.js");
     return new PrismaStore();
   }
   return new MemoryAsync();

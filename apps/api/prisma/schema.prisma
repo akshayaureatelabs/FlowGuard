@@ -19,15 +19,54 @@ model User {
 }
 
 model Project {
-  id        String   @id @default(uuid())
+    id           String   @id @default(uuid())
+    name         String
+    ownerId      String?
+    owner        User?    @relation(fields: [ownerId], references: [id])
+    teamId       String?
+    team         Team?    @relation(fields: [teamId], references: [id])
+    notifyEmail  String?
+    notifyWebhook String?
+    createdAt    DateTime @default(now())
+    updatedAt    DateTime @updatedAt
+    environments Environment[]
+    tests        Test[]
+    modules      Module[]
+  }
+
+model Team {
+  id        String       @id @default(uuid())
   name      String
-  ownerId   String?
-  owner     User?    @relation(fields: [ownerId], references: [id])
+  createdBy String
+  createdAt DateTime     @default(now())
+  updatedAt DateTime     @updatedAt
+  members   TeamMember[]
+  invites   Invite[]
+  projects  Project[]
+}
+
+model TeamMember {
+  id        String   @id @default(uuid())
+  teamId    String
+  team      Team     @relation(fields: [teamId], references: [id], onDelete: Cascade)
+  userId    String
+  role      String
   createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-  environments Environment[]
-  tests        Test[]
-  modules      Module[]
+
+  @@unique([teamId, userId])
+}
+
+model Invite {
+  id        String   @id @default(uuid())
+  teamId    String
+  team      Team     @relation(fields: [teamId], references: [id], onDelete: Cascade)
+  email     String
+  role      String
+  token     String   @unique
+  status    String   @default("pending")
+  createdBy String
+  expiresAt DateTime
+  createdAt DateTime @default(now())
 }
 
 model Environment {
@@ -82,18 +121,23 @@ model TestRun {
 }
 
 model Schedule {
-  id              String   @id @default(uuid())
-  testId          String
-  test            Test     @relation(fields: [testId], references: [id], onDelete: Cascade)
-  environmentId   String
-  environment     Environment @relation(fields: [environmentId], references: [id], onDelete: Cascade)
-  enabled         Boolean  @default(true)
-  intervalMinutes Int?
-  cron            String?
-  notifyEmail     String?
-  notifyWebhook   String?
-  lastRunAt       DateTime?
-  nextRunAt       DateTime?
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
-}
+    id              String   @id @default(uuid())
+    testId          String
+    test            Test     @relation(fields: [testId], references: [id], onDelete: Cascade)
+    environmentId   String
+    environment     Environment @relation(fields: [environmentId], references: [id], onDelete: Cascade)
+    enabled         Boolean  @default(true)
+    intervalMinutes Int?
+    cron            String?
+    notifyEmail     String?
+    notifyWebhook   String?
+    maxRetries      Int      @default(1)
+    retryCount      Int      @default(0)
+    lastRunStatus   String?
+    lastError       String?
+    runsCount       Int      @default(0)
+    lastRunAt       DateTime?
+    nextRunAt       DateTime?
+    createdAt       DateTime @default(now())
+    updatedAt       DateTime @updatedAt
+  }

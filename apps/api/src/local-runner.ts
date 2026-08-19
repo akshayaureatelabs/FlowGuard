@@ -1,10 +1,10 @@
-import { chromium, firefox, type Browser, type Page, type Locator } from "playwright";
+import { chromium, firefox, webkit, type Browser, type Page, type Locator } from "playwright";
 import path from "path";
 import fs from "fs";
 import pixelmatchRaw from "pixelmatch";
 import { PNG } from "pngjs";
 import AxeBuilder from "@axe-core/playwright";
-import type { Test, Environment, Step, StepResult, Module } from "@flowguard/shared";
+import type { Test, Environment, Step, StepResult, Module, Selector } from "@flowguard/shared";
 import { repo } from "./repo.js";
 import { trackRunFinished } from "./metrics.js";
 
@@ -34,9 +34,93 @@ const AXE_TAGS: Record<string, string[]> = {
   wcag21aa: ["wcag2a", "wcag2aa", "wcag21aa"],
 }
 
+interface HealInfo {
+  from?: string;
+  to?: string;
+  reason?: string;
+}
+
+const TAG_WORDS = new Set([
+  "html", "body", "div", "span", "ul", "li", "ol", "table", "tr", "td", "th",
+  "thead", "tbody", "button", "input", "a", "form", "section", "p", "label",
+  "select", "textarea", "img", "header", "footer", "nav", "main", "aside",
+  "article", "h1", "h2", "h3", "h4", "h5", "h6", "video", "canvas", "svg",
+  "head", "script", "style", "strong", "em", "small", "br", "hr",
+]);
+
+function extractTokens(sel: string): string[] {
+  const raw: string[] = [];
+  for (const m of sel.matchAll(
+    /\[(?:data-testid|data-test|data-id|name|aria-label|placeholder|id|title)\s*(?:[~|^$*]?=)\s*["']?([^"'\]]+)["']?\]/gi
+  )) {
+    raw.push(m[1]);
+  }
+  for (const m of sel.matchAll(/#([\w-]+)/g)) raw.push(m[1]);
+  for (const m of sel.matchAll(/\.([\w-]+)/g)) raw.push(m[1]);
+  for (const m of sel.matchAll(/([a-zA-Z0-9][a-zA-Z0-9_-]*)/g)) raw.push(m[1]);
+  const out: string[] = [];
+  for (const t of raw) {
+    out.push(t, ...t.split(/[_-]+/).filter(Boolean));
+    const camel = t.split(/(?=[A-Z])/).map((w) => w.toLowerCase());
+    if (camel.length > 1) out.push(...camel);
+  }
+  const merged = new Set(out.map((t) => t.toLowerCase()));
+  return [...merged].filter(
+    (t) => t.length >= 3 && /^[a-z0-9_-]+$/.test(t) && !TAG_WORDS.has(t)
+  );
+}
+
+async function probeUnique(page: Page, selector: string): Promise<Locator | null> {
+  try {
+    const loc = page.locator(selector);
+    const n = await loc.count();
+    if (n === 1) return loc.first();
+    if (n > 1) {
+      const visible = loc.filter({ visible: true });
+      if ((await visible.count()) === 1) return visible.first();
+    }
+  } catch {
+    /* probe failed */
+  }
+  return null;
+}
+
+async function healLocate(page: Page, sel: Selector, heal: HealInfo): Promise<Locator | null> {
+  if (sel.type !== "css" || !sel.primary) return null;
+  const tokens = extractTokens(sel.primary);
+  const attrs = [
+    "data-testid", "data-test", "data-id", "name", "aria-label",
+    "placeholder", "id", "title", "class",
+  ];
+  for (const t of tokens) {
+    for (const a of attrs) {
+      const probe = `[${a}*="${t}"]`;
+      const found = await probeUnique(page, probe);
+      if (found) {
+        heal.from = sel.primary;
+        heal.to = probe;
+        heal.reason = `matched ${a} containing "${t}"`;
+        return found;
+      }
+    }
+  }
+  for (const t of tokens) {
+    const probe = `text=${t}`;
+    const found = await probeUnique(page, probe);
+    if (found) {
+      heal.from = sel.primary;
+      heal.to = probe;
+      heal.reason = `matched text "${t}"`;
+      return found;
+    }
+  }
+  return null;
+}
+
 async function locate(
   page: Page,
-  sel: { primary: string; type?: string; backups?: string[] }
+  sel: { primary: string; type?: string; backups?: string[] },
+  heal: HealInfo = {}
 ): Promise<Locator> {
   const candidates = [sel.primary, ...(sel.backups || [])];
   for (const c of candidates) {
@@ -49,6 +133,8 @@ async function locate(
       /* try next */
     }
   }
+  const healed = await healLocate(page, sel as Selector, heal);
+  if (healed) return healed;
   return sel.type === "xpath"
     ? page.locator(`xpath=${sel.primary}`).first()
     : page.locator(sel.primary).first();
@@ -67,6 +153,7 @@ async function executeStep(
   modules: Map<string, Module>
 ): Promise<StepResult[]> {
   const start = Date.now();
+  const heal: HealInfo = {};
   const one = (partial: Partial<StepResult> & { status: StepResult["status"] }): StepResult[] => [
     { stepId: step.id, durationMs: Date.now() - start, ...partial },
   ];
@@ -80,7 +167,7 @@ async function executeStep(
         break;
       }
       case "click": {
-        const loc = await locate(page, step.config.selector);
+        const loc = await locate(page, step.config.selector, heal);
         await loc.click({
           button: step.config.button || "left",
           clickCount: step.config.clickCount || 1,
@@ -88,31 +175,31 @@ async function executeStep(
         break;
       }
       case "type": {
-        const loc = await locate(page, step.config.selector);
+        const loc = await locate(page, step.config.selector, heal);
         const value = interpolate(step.config.value, vars);
         if (step.config.clearFirst) await loc.fill("");
         await loc.fill(value);
         break;
       }
       case "clear": {
-        const loc = await locate(page, step.config.selector);
+        const loc = await locate(page, step.config.selector, heal);
         await loc.fill("");
         break;
       }
       case "select": {
-        const loc = await locate(page, step.config.selector);
+        const loc = await locate(page, step.config.selector, heal);
         await loc.selectOption(interpolate(step.config.value, vars));
         break;
       }
       case "hover": {
-        const loc = await locate(page, step.config.selector);
+        const loc = await locate(page, step.config.selector, heal);
         await loc.hover();
         break;
       }
       case "wait": {
         if (step.config.ms) await page.waitForTimeout(step.config.ms);
         else if (step.config.selector) {
-          const loc = await locate(page, step.config.selector);
+          const loc = await locate(page, step.config.selector, heal);
           await loc.waitFor({ state: step.config.state || "visible" });
         } else await page.waitForTimeout(1000);
         break;
@@ -125,7 +212,7 @@ async function executeStep(
         } else if (assertion === "urlEquals") {
           if (page.url() !== exp) throw new Error(`URL !== "${exp}"`);
         } else if (selector) {
-          const loc = await locate(page, selector);
+          const loc = await locate(page, selector, heal);
           if (assertion === "textContains") {
             const text = (await loc.textContent()) || "";
             if (!text.includes(exp)) throw new Error(`Text does not contain "${exp}"`);
@@ -153,12 +240,16 @@ async function executeStep(
       case "screenshot": {
         const file = path.join(runDir, `${step.id}.png`);
         if (step.config.selector) {
-          const loc = await locate(page, step.config.selector);
+          const loc = await locate(page, step.config.selector, heal);
           await loc.screenshot({ path: file });
         } else {
           await page.screenshot({ path: file, fullPage: step.config.fullPage ?? false });
         }
-        return one({ status: "passed", screenshot: artifactUrl(file) });
+        return one({
+          status: "passed",
+          screenshot: artifactUrl(file),
+          ...(heal.to ? { meta: { healed: { from: heal.from, to: heal.to, reason: heal.reason } } } : {}),
+        });
       }
       case "javascript": {
         const code = interpolate(step.config.code, vars);
@@ -191,7 +282,7 @@ async function executeStep(
         const currentPath = path.join(runDir, `visual-${step.id}.png`);
         const diffPath = path.join(runDir, `visual-${step.id}-diff.png`);
         if (step.config.selector) {
-          const loc = await locate(page, step.config.selector);
+          const loc = await locate(page, step.config.selector, heal);
           await loc.screenshot({ path: currentPath });
         } else {
           await page.screenshot({
@@ -204,7 +295,11 @@ async function executeStep(
           return one({
             status: "passed",
             screenshot: artifactUrl(currentPath),
-            meta: { baselineCreated: true, baselinePath },
+            meta: {
+              baselineCreated: true,
+              baselinePath,
+              ...(heal.to ? { healed: { from: heal.from, to: heal.to, reason: heal.reason } } : {}),
+            },
           });
         }
         const a = PNG.sync.read(fs.readFileSync(baselinePath));
@@ -234,7 +329,12 @@ async function executeStep(
         return one({
           status: "passed",
           screenshot: artifactUrl(currentPath),
-          meta: { baselinePath, diffPixels, diffRatio: ratio },
+          meta: {
+            baselinePath,
+            diffPixels,
+            diffRatio: ratio,
+            ...(heal.to ? { healed: { from: heal.from, to: heal.to, reason: heal.reason } } : {}),
+          },
         });
       }
       case "module": {
@@ -255,7 +355,13 @@ async function executeStep(
 
     const shot = path.join(runDir, `${step.id}.png`);
     await page.screenshot({ path: shot }).catch(() => {});
-    return one({ status: "passed", screenshot: artifactUrl(shot) });
+    return one({
+      status: "passed",
+      screenshot: artifactUrl(shot),
+      ...(heal.to
+        ? { meta: { healed: { from: heal.from, to: heal.to, reason: heal.reason } } }
+        : {}),
+    });
   } catch (err: any) {
     const shot = path.join(runDir, `${step.id}-error.png`);
     await page.screenshot({ path: shot }).catch(() => {});
@@ -264,6 +370,32 @@ async function executeStep(
       error: err?.message || String(err),
       screenshot: artifactUrl(shot),
     });
+  }
+}
+
+export async function launchBrowser(name: string, remoteUrl: string): Promise<Browser> {
+  if (remoteUrl) {
+    if (remoteUrl.startsWith("ws://") || remoteUrl.startsWith("wss://")) {
+      const bt =
+        name === "firefox" ? firefox : name === "safari" ? webkit : chromium;
+      return bt.connect(remoteUrl);
+    }
+    // http(s):// → Chrome DevTools Protocol endpoint (BrowserStack/Selenium-style).
+    return chromium.connectOverCDP(remoteUrl);
+  }
+  switch (name) {
+    case "firefox":
+      return firefox.launch({ headless: true });
+    case "safari":
+      return webkit.launch({ headless: true });
+    case "edge":
+      try {
+        return await chromium.launch({ headless: true, channel: "msedge" });
+      } catch {
+        return chromium.launch({ headless: true });
+      }
+    default:
+      return chromium.launch({ headless: true });
   }
 }
 
@@ -291,15 +423,17 @@ export async function runLocalTest(
 
   try {
     const browserName = test.settings?.browser || "chrome";
-    browser =
-      browserName === "firefox"
-        ? await firefox.launch({ headless: true })
-        : await chromium.launch({ headless: true });
+    const remoteUrl =
+      test.settings?.remoteUrl || process.env.PLAYWRIGHT_GRID_URL || "";
 
-    const context = await browser.newContext({
-      viewport: test.settings?.viewport || { width: 1280, height: 720 },
-    });
-    const page = await context.newPage();
+    browser = await launchBrowser(browserName, remoteUrl);
+
+    const viewport = test.settings?.viewport || { width: 1280, height: 720 };
+    // CDP-connected browsers reuse the browser's existing context/page.
+    const context = /^https?:/.test(remoteUrl)
+      ? browser.contexts()[0] || (await browser.newContext({ viewport }))
+      : await browser.newContext({ viewport });
+    const page = context.pages()[0] || (await context.newPage());
 
     if (test.steps.length === 0 || test.steps[0].type !== "navigate") {
       await page.goto(env.baseUrl, { waitUntil: "domcontentloaded" });

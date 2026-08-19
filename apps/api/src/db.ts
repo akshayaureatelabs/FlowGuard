@@ -15,7 +15,7 @@ export const useDatabase = useMongo || usePostgres;
 export type DbMode = "mongo" | "postgres" | "memory";
 export const dbMode: DbMode = useMongo ? "mongo" : usePostgres ? "postgres" : "memory";
 
-const require = createRequire(import.meta.url);
+const nodeRequire = createRequire(__filename);
 
 /** Lazy Prisma client — only when Postgres mode. */
 export function getPrisma(): any {
@@ -23,7 +23,7 @@ export function getPrisma(): any {
   const g = globalThis as any;
   if (!g.__flowguardPrisma) {
     try {
-      const { PrismaClient } = require("@prisma/client");
+      const { PrismaClient } = nodeRequire("@prisma/client");
       g.__flowguardPrisma = new PrismaClient();
     } catch (err: any) {
       throw new Error(
@@ -39,7 +39,7 @@ export async function getMongo(): Promise<any> {
   if (!useMongo) return null;
   const g = globalThis as any;
   if (!g.__flowguardMongo) {
-    const { MongoClient } = require("mongodb");
+    const { MongoClient } = nodeRequire("mongodb");
     const url =
       process.env.MONGODB_URL ||
       process.env.MONGO_URL ||

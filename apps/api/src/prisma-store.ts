@@ -1,6 +1,9 @@
 import { getPrisma } from "./db.js";
+import { computeNextRun } from "./schedule.js";
+import { v4 as uuid } from "uuid";
 import type {
   Project,
+  ProjectPatch,
   Environment,
   Test,
   TestRun,
@@ -8,6 +11,10 @@ import type {
   Module,
   Schedule,
   TestSettings,
+  Team,
+  TeamMember,
+  TeamRole,
+  TeamInvite,
 } from "@flowguard/shared";
 
 function prisma() {
@@ -25,10 +32,45 @@ function toIso(d: Date | string) {
       id: p.id,
       name: p.name,
       ...(p.ownerId ? { ownerId: p.ownerId } : {}),
+      ...(p.teamId ? { teamId: p.teamId } : {}),
       createdAt: toIso(p.createdAt),
       updatedAt: toIso(p.updatedAt),
     };
   }
+
+function mapTeam(t: any): Team {
+  return {
+    id: t.id,
+    name: t.name,
+    createdBy: t.createdBy,
+    createdAt: toIso(t.createdAt),
+    updatedAt: toIso(t.updatedAt),
+  };
+}
+
+function mapMember(m: any): TeamMember {
+  return {
+    id: m.id,
+    teamId: m.teamId,
+    userId: m.userId,
+    role: m.role,
+    createdAt: toIso(m.createdAt),
+  };
+}
+
+function mapInvite(i: any): TeamInvite {
+  return {
+    id: i.id,
+    teamId: i.teamId,
+    email: i.email,
+    role: i.role,
+    token: i.token,
+    status: i.status,
+    createdBy: i.createdBy,
+    expiresAt: toIso(i.expiresAt),
+    createdAt: toIso(i.createdAt),
+  };
+}
 
 function mapEnv(e: any): Environment {
   return {
@@ -90,6 +132,11 @@ function mapSchedule(s: any): Schedule {
     cron: s.cron ?? undefined,
     notifyEmail: s.notifyEmail ?? undefined,
     notifyWebhook: s.notifyWebhook ?? undefined,
+    maxRetries: s.maxRetries ?? 1,
+    retryCount: s.retryCount ?? 0,
+    lastRunStatus: s.lastRunStatus ?? undefined,
+    lastError: s.lastError ?? undefined,
+    runsCount: s.runsCount ?? 0,
     lastRunAt: s.lastRunAt ? toIso(s.lastRunAt) : undefined,
     nextRunAt: s.nextRunAt ? toIso(s.nextRunAt) : undefined,
     createdAt: toIso(s.createdAt),
@@ -110,11 +157,153 @@ export class PrismaStore {
     const p = await prisma().project.findUnique({ where: { id } });
     return p ? mapProject(p) : undefined;
   }
-  async updateProject(id: string, name: string): Promise<Project | undefined> {
+  async updateProject(id: string, patch: ProjectPatch): Promise<Project | undefined> {
     try {
-      return mapProject(await prisma().project.update({ where: { id }, data: { name } }));
+      const data: Record<string, unknown> = {};
+      if (patch.name !== undefined) data.name = patch.name;
+      if (patch.notifyEmail !== undefined) data.notifyEmail = patch.notifyEmail || null;
+      if (patch.notifyWebhook !== undefined) data.notifyWebhook = patch.notifyWebhook || null;
+      if (patch.teamId !== undefined) data.teamId = patch.teamId || null;
+      return mapProject(await prisma().project.update({ where: { id }, data }));
     } catch {
       return undefined;
+    }
+  }
+
+  // Teams
+  async createTeam(name: string, ownerUserId: string): Promise<Team> {
+    const team = await prisma().team.create({
+      data: {
+        name,
+        createdBy: ownerUserId,
+        members: { create: { userId: ownerUserId, role: "owner" } },
+      },
+    });
+    return mapTeam(team);
+  }
+  async listTeamsForUser(userId: string): Promise<{ team: Team; role: TeamRole }[]> {
+    const rows = await prisma().team.findMany({
+      where: { members: { some: { userId } } },
+      include: { members: { where: { userId } } },
+    });
+    return rows.map((t: any) => ({
+      team: mapTeam(t),
+      role: (t.members?.[0]?.role as TeamRole) ?? "member",
+    }));
+  }
+  async getTeam(id: string): Promise<Team | undefined> {
+    const t = await prisma().team.findUnique({ where: { id } });
+    return t ? mapTeam(t) : undefined;
+  }
+  async deleteTeam(id: string): Promise<boolean> {
+    try {
+      await prisma().team.delete({ where: { id } });
+      return true;
+    } catch {
+      return false;
+    }
+  }
+  async listTeamMembers(teamId: string): Promise<TeamMember[]> {
+    return (await prisma().teamMember.findMany({ where: { teamId } })).map(mapMember);
+  }
+  async getTeamMember(teamId: string, userId: string): Promise<TeamMember | undefined> {
+    const m = await prisma().teamMember.findUnique({
+      where: { teamId_userId: { teamId, userId } },
+    });
+    return m ? mapMember(m) : undefined;
+  }
+  async isTeamMember(teamId: string, userId: string): Promise<boolean> {
+    return !!(await this.getTeamMember(teamId, userId));
+  }
+  async addTeamMember(
+    teamId: string,
+    userId: string,
+    role: TeamRole = "member"
+  ): Promise<TeamMember> {
+    return mapMember(
+      await prisma().teamMember.create({ data: { teamId, userId, role } })
+    );
+  }
+  async updateTeamMember(
+    teamId: string,
+    userId: string,
+    role: TeamRole
+  ): Promise<TeamMember | undefined> {
+    try {
+      return mapMember(
+        await prisma().teamMember.update({
+          where: { teamId_userId: { teamId, userId } },
+          data: { role },
+        })
+      );
+    } catch {
+      return undefined;
+    }
+  }
+  async removeTeamMember(teamId: string, userId: string): Promise<boolean> {
+    try {
+      await prisma().teamMember.delete({
+        where: { teamId_userId: { teamId, userId } },
+      });
+      return true;
+    } catch {
+      return false;
+    }
+  }
+  async createInvite(
+    teamId: string,
+    email: string,
+    role: TeamRole,
+    createdBy: string
+  ): Promise<TeamInvite> {
+    const invite = await prisma().invite.create({
+      data: {
+        teamId,
+        email,
+        role,
+        token: uuid().replace(/-/g, "").slice(0, 24),
+        createdBy,
+        expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
+        status: "pending",
+      },
+    });
+    return mapInvite(invite);
+  }
+  async listInvites(teamId: string): Promise<TeamInvite[]> {
+    return (
+      await prisma().invite.findMany({ where: { teamId }, orderBy: { createdAt: "desc" } })
+    ).map(mapInvite);
+  }
+  async getInviteByToken(token: string): Promise<TeamInvite | undefined> {
+    const i = await prisma().invite.findUnique({ where: { token } });
+    return i ? mapInvite(i) : undefined;
+  }
+  async acceptInvite(token: string, userId: string): Promise<TeamMember | undefined> {
+    const invite = await prisma().invite.findUnique({ where: { token } });
+    if (!invite || invite.status !== "pending") return undefined;
+    if (new Date(invite.expiresAt).getTime() < Date.now()) return undefined;
+    const updated = await prisma().invite.update({
+      where: { id: invite.id },
+      data: { status: "accepted" },
+    });
+    void updated;
+    const existing = await this.getTeamMember(invite.teamId, userId);
+    if (existing) return existing;
+    return mapMember(
+      await prisma().teamMember.create({
+        data: { teamId: invite.teamId, userId, role: invite.role },
+      })
+    );
+  }
+  async revokeInvite(teamId: string, inviteId: string): Promise<boolean> {
+    try {
+      await prisma().invite.update({
+        where: { id: inviteId, teamId },
+        data: { status: "revoked" },
+      });
+      return true;
+    } catch {
+      return false;
     }
   }
   async deleteProject(id: string): Promise<boolean> {
@@ -291,6 +480,7 @@ export class PrismaStore {
     notifyEmail?: string;
     notifyWebhook?: string;
     enabled?: boolean;
+    maxRetries?: number;
   }): Promise<Schedule> {
     const interval = data.intervalMinutes || 60;
     return mapSchedule(
@@ -303,7 +493,8 @@ export class PrismaStore {
           cron: data.cron,
           notifyEmail: data.notifyEmail,
           notifyWebhook: data.notifyWebhook,
-          nextRunAt: new Date(Date.now() + interval * 60_000),
+          maxRetries: data.maxRetries ?? 1,
+          nextRunAt: computeNextRun(data.cron, interval),
         },
       })
     );

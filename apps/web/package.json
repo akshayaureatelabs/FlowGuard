@@ -1,4 +1,4 @@
-{
+﻿{
   "name": "@flowguard/web",
   "version": "0.1.0",
   "private": true,
@@ -6,7 +6,8 @@
     "dev": "next dev -p 3000",
     "build": "next build",
     "start": "next start",
-    "test:e2e": "playwright test"
+    "test:e2e": "playwright test",
+    "typecheck": "tsc --noEmit"
   },
   "dependencies": {
     "@flowguard/shared": "workspace:*",

@@ -27,6 +27,7 @@ export default function RootLayout({
             </a>
             <nav>
               <a href="/">Projects</a>
+              <a href="/teams">Teams</a>
               <a href="/login">Sign in</a>
             </nav>
           </div>

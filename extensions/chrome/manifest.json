@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
   "name": "FlowGuard Recorder",
-  "version": "0.1.0",
-  "description": "Record browser actions and export FlowGuard test steps",
+  "version": "0.2.0",
+  "description": "Record browser actions and push them to FlowGuard cloud tests",
   "permissions": ["activeTab", "scripting", "storage"],
   "host_permissions": [
     "http://localhost:3001/*",

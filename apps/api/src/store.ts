@@ -1,6 +1,8 @@
 import { v4 as uuid } from "uuid";
+import { computeNextRunIso } from "./schedule.js";
 import type {
   Project,
+  ProjectPatch,
   Environment,
   Test,
   TestRun,
@@ -8,6 +10,10 @@ import type {
   Module,
   Schedule,
   TestSettings,
+  Team,
+  TeamMember,
+  TeamRole,
+  TeamInvite,
 } from "@flowguard/shared";
 
 const now = () => new Date().toISOString();
@@ -19,6 +25,9 @@ class MemoryStore {
   runs = new Map<string, TestRun>();
   modules = new Map<string, Module>();
   schedules = new Map<string, Schedule>();
+  teams = new Map<string, Team>();
+  teamMembers = new Map<string, TeamMember>();
+  teamInvites = new Map<string, TeamInvite>();
 
   createProject(name: string, ownerId?: string): Project {
     const id = uuid();
@@ -35,13 +44,156 @@ class MemoryStore {
     return this.projects.get(id);
   }
 
-  updateProject(id: string, name: string): Project | undefined {
+  updateProject(id: string, patch: ProjectPatch): Project | undefined {
     const project = this.projects.get(id);
     if (!project) return undefined;
-    project.name = name;
+    if (patch.name !== undefined) project.name = patch.name;
+    if (patch.notifyEmail !== undefined) {
+      project.notifyEmail = patch.notifyEmail || undefined;
+    }
+    if (patch.notifyWebhook !== undefined) {
+      project.notifyWebhook = patch.notifyWebhook || undefined;
+    }
+    if (patch.teamId !== undefined) project.teamId = patch.teamId || undefined;
     project.updatedAt = now();
     this.projects.set(id, project);
     return project;
+  }
+
+  // Teams
+  createTeam(name: string, ownerUserId: string): Team {
+    const id = uuid();
+    const team: Team = {
+      id,
+      name,
+      createdBy: ownerUserId,
+      createdAt: now(),
+      updatedAt: now(),
+    };
+    this.teams.set(id, team);
+    const memberId = uuid();
+    this.teamMembers.set(memberId, {
+      id: memberId,
+      teamId: id,
+      userId: ownerUserId,
+      role: "owner",
+      createdAt: now(),
+    });
+    return team;
+  }
+
+  listTeamsForUser(userId: string): { team: Team; role: TeamRole }[] {
+    const roles = new Map<string, TeamRole>();
+    for (const m of this.teamMembers.values()) {
+      if (m.userId === userId) roles.set(m.teamId, m.role);
+    }
+    return Array.from(this.teams.values())
+      .filter((t) => roles.has(t.id))
+      .map((t) => ({ team: t, role: roles.get(t.id)! }));
+  }
+
+  deleteTeam(id: string): boolean {
+    if (!this.teams.has(id)) return false;
+    this.teams.delete(id);
+    for (const [mid, m] of this.teamMembers) {
+      if (m.teamId === id) this.teamMembers.delete(mid);
+    }
+    for (const [iid, i] of this.teamInvites) {
+      if (i.teamId === id) this.teamInvites.delete(iid);
+    }
+    for (const p of this.projects.values()) {
+      if (p.teamId === id) p.teamId = undefined;
+    }
+    return true;
+  }
+
+  getTeam(id: string): Team | undefined {
+    return this.teams.get(id);
+  }
+
+  listTeamMembers(teamId: string): TeamMember[] {
+    return Array.from(this.teamMembers.values()).filter((m) => m.teamId === teamId);
+  }
+
+  getTeamMember(teamId: string, userId: string): TeamMember | undefined {
+    return Array.from(this.teamMembers.values()).find(
+      (m) => m.teamId === teamId && m.userId === userId
+    );
+  }
+
+  async isTeamMember(teamId: string, userId: string): Promise<boolean> {
+    return !!this.getTeamMember(teamId, userId);
+  }
+
+  addTeamMember(teamId: string, userId: string, role: TeamRole = "member"): TeamMember {
+    const m: TeamMember = {
+      id: uuid(),
+      teamId,
+      userId,
+      role,
+      createdAt: now(),
+    };
+    this.teamMembers.set(m.id, m);
+    return m;
+  }
+
+  updateTeamMember(teamId: string, userId: string, role: TeamRole): TeamMember | undefined {
+    const m = this.getTeamMember(teamId, userId);
+    if (!m) return undefined;
+    m.role = role;
+    return m;
+  }
+
+  removeTeamMember(teamId: string, userId: string): boolean {
+    const m = this.getTeamMember(teamId, userId);
+    if (!m) return false;
+    return this.teamMembers.delete(m.id);
+  }
+
+  createInvite(
+    teamId: string,
+    email: string,
+    role: TeamRole,
+    createdBy: string
+  ): TeamInvite {
+    const invite: TeamInvite = {
+      id: uuid(),
+      teamId,
+      email,
+      role,
+      token: uuid().replace(/-/g, "").slice(0, 24),
+      status: "pending",
+      createdBy,
+      expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString(),
+      createdAt: now(),
+    };
+    this.teamInvites.set(invite.id, invite);
+    return invite;
+  }
+
+  listInvites(teamId: string): TeamInvite[] {
+    return Array.from(this.teamInvites.values()).filter((i) => i.teamId === teamId);
+  }
+
+  getInviteByToken(token: string): TeamInvite | undefined {
+    return Array.from(this.teamInvites.values()).find((i) => i.token === token);
+  }
+
+  acceptInvite(token: string, userId: string): TeamMember | undefined {
+    const invite = this.getInviteByToken(token);
+    if (!invite || invite.status !== "pending") return undefined;
+    if (new Date(invite.expiresAt).getTime() < Date.now()) return undefined;
+    invite.status = "accepted";
+    const existing = this.getTeamMember(invite.teamId, userId);
+    if (existing) return existing;
+    return this.addTeamMember(invite.teamId, userId, invite.role);
+  }
+
+  revokeInvite(teamId: string, inviteId: string): boolean {
+    const i = this.teamInvites.get(inviteId);
+    if (!i || i.teamId !== teamId) return false;
+    i.status = "revoked";
+    return true;
   }
 
   deleteProject(id: string): boolean {
@@ -253,6 +405,7 @@ class MemoryStore {
     notifyEmail?: string;
     notifyWebhook?: string;
     enabled?: boolean;
+    maxRetries?: number;
   }): Schedule {
     const id = uuid();
     const interval = data.intervalMinutes || 60;
@@ -265,7 +418,10 @@ class MemoryStore {
       cron: data.cron,
       notifyEmail: data.notifyEmail,
       notifyWebhook: data.notifyWebhook,
-      nextRunAt: new Date(Date.now() + interval * 60_000).toISOString(),
+      maxRetries: data.maxRetries ?? 1,
+      retryCount: 0,
+      runsCount: 0,
+      nextRunAt: computeNextRunIso(data.cron, interval),
       createdAt: now(),
       updatedAt: now(),
     };
