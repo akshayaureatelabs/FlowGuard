@@ -159,19 +159,21 @@ adminRouter.get("/overview", async (_req, res) => {
 
 adminRouter.get("/projects", async (req, res) => {
   const projects: Project[] = await repo.listProjects();
-  const out = [];
-  for (const p of projects) {
-    const envs = await repo.listEnvironments(p.id);
-    const tests = await repo.listTests(p.id);
-    let runCount = 0;
-    for (const t of tests) runCount += (await repo.listRuns(t.id)).length;
-    out.push({
+  const envLists = await Promise.all(projects.map((p) => repo.listEnvironments(p.id)));
+  const testLists = await Promise.all(projects.map((p) => repo.listTests(p.id)));
+  const allRuns = await repo.listRuns();
+  const runsByTest = new Map<string, number>();
+  for (const r of allRuns) runsByTest.set(r.testId, (runsByTest.get(r.testId) ?? 0) + 1);
+  const out = projects.map((p, i) => {
+    const tests: Test[] = testLists[i];
+    const runCount = tests.reduce((sum: number, t: Test) => sum + (runsByTest.get(t.id) ?? 0), 0);
+    return {
       ...p,
-      environmentCount: envs.length,
+      environmentCount: envLists[i].length,
       testCount: tests.length,
       runCount,
-    });
-  }
+    };
+  });
   const { limit, offset } = pageParams(req.query);
   res.json(paginate(out, limit, offset));
 });

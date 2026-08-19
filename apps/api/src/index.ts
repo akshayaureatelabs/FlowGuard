@@ -36,6 +36,7 @@ import {
   registerUser,
   loginUser,
   AUTH_DISABLED,
+  assertAuthSafety,
 } from "./auth.js";
 import { openApiSpec } from "./openapi.js";
 import { adminRouter, requireAdminKey, assertAdminKeyConfigured } from "./admin.js";
@@ -46,6 +47,7 @@ import {
   getMetrics,
 } from "./metrics.js";
 import { notifyForRun } from "./notify.js";
+import { acquireSchedulerLock } from "./redis-lock.js";
 
 const app = express();
 const PORT = Number(process.env.PORT) || 3001;
@@ -53,7 +55,11 @@ const PORT = Number(process.env.PORT) || 3001;
 // Cross-Origin-Resource-Policy disabled so the web app (different origin) can
 // embed artifacts (screenshots/diffs) served from this API.
 app.use(helmet({ contentSecurityPolicy: false, crossOriginResourcePolicy: false }));
-app.use(cors());
+const CORS_ORIGINS = (process.env.CORS_ORIGINS || "http://localhost:3000")
+  .split(",")
+  .map((s) => s.trim())
+  .filter(Boolean);
+app.use(cors({ origin: CORS_ORIGINS }));
 app.use(express.json({ limit: "2mb" }));
 app.use((_req, _res, next) => {
   trackRequest();
@@ -663,6 +669,7 @@ async function triggerSchedule(sch: Schedule): Promise<void> {
 
 setInterval(async () => {
   try {
+    if (!(await acquireSchedulerLock())) return;
     const due = await repo.dueSchedules();
     for (const sch of due) {
       await triggerSchedule(sch);
@@ -686,6 +693,7 @@ async function start() {
   }
   try {
     assertAdminKeyConfigured();
+    assertAuthSafety();
   } catch (err: any) {
     console.error(err?.message || err);
     process.exit(1);

@@ -2,6 +2,7 @@ import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import request from "supertest";
 import express from "express";
 import { adminRouter, requireAdminKey, assertAdminKeyConfigured } from "../src/admin.js";
+import { assertAuthSafety } from "../src/auth.js";
 import { store } from "../src/store.js";
 
 function buildApp() {
@@ -139,6 +140,24 @@ describe("admin router", () => {
       process.env.NODE_ENV = "test";
       process.env.ADMIN_KEY = "";
       expect(() => assertAdminKeyConfigured()).not.toThrow();
+    });
+  });
+
+  describe("assertAuthSafety", () => {
+    const origNodeEnv = process.env.NODE_ENV;
+
+    afterAll(() => {
+      process.env.NODE_ENV = origNodeEnv;
+    });
+
+    it("refuses to start in production with auth disabled", () => {
+      process.env.NODE_ENV = "production";
+      expect(assertAuthSafety).toThrow(/AUTH_DISABLED/);
+    });
+
+    it("does not block non-production", () => {
+      process.env.NODE_ENV = "test";
+      expect(() => assertAuthSafety()).not.toThrow();
     });
   });
 

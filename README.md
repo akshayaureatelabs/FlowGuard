@@ -89,13 +89,13 @@ JWT (`Authorization: Bearer …`) and API key (`x-api-key`). Each user only sees
 their own projects (multi-user isolation). Legacy projects created before
 ownership was added remain visible to everyone.
 
-> **Production:** set `AUTH_DISABLED=false` and a strong `JWT_SECRET`. On first
-> boot with auth enabled, register the first user via
-> `POST /api/auth/register` (or the web sign-in page — it falls back to
-> registration when the account doesn't exist). Keep `ADMIN_KEY` set to a
-> strong value — the admin panel is a global operator view that bypasses
-> per-user scoping. The API refuses to start in production with `ADMIN_KEY`
-> unset or set to the default `flowguard-admin`.
+> **Production:** set `AUTH_DISABLED=false` and a strong `JWT_SECRET`. The API
+> **refuses to start in production** with `AUTH_DISABLED=true`, `ADMIN_KEY`
+> unset/default, or a placeholder `JWT_SECRET`. On first boot with auth
+> enabled, register the first user via `POST /api/auth/register` (or the web
+> sign-in page — it falls back to registration when the account doesn't exist).
+> Keep `ADMIN_KEY` set to a strong value — the admin panel is a global operator
+> view that bypasses per-user scoping.
 
 ---
 
@@ -117,6 +117,19 @@ Two views:
 
 Admin routes live under `/api/admin/*` and are **separate from user auth** — the
 admin key is the only gate, so treat it as a shared operator secret.
+
+---
+
+## CORS & scheduler hardening
+
+- **CORS:** the API only answers cross-origin browser calls for the origins in
+  `CORS_ORIGINS` (comma-separated, default `http://localhost:3000`). If you
+  deploy the web app elsewhere or use the browser recorder from an extension,
+  add those origins (e.g. `https://myapp.example.com,chrome-extension://<id>`).
+- **Scheduler:** auto-runs are driven by an in-process ticker every 30s. For
+  multi-instance deploys set `REDIS_URL` to enable a Redis-backed leader lock —
+  only the instance holding the lock triggers schedules, so duplicates are
+  avoided. A single instance needs no Redis.
 
 ---
 
@@ -165,6 +178,8 @@ then optionally **Push steps to test** with the API URL + test ID + API key
    - `MONGODB_URL` → your Atlas connection string
    - `AUTH_DISABLED=false`, `JWT_SECRET` (long random)
    - `ADMIN_KEY` → strong random value (refused in production if unset/default)
+   - `CORS_ORIGINS` → the web app origin(s) allowed to call the API
+   - `REDIS_URL` (optional) → enables the scheduler leader lock for multi-instance
    - `PUBLIC_URL`, `SMTP_*`, `EMAIL_FROM` (optional, for alerts)
    - `ARTIFACTS_DIR` → persistent volume path if you want screenshots to survive restarts
 

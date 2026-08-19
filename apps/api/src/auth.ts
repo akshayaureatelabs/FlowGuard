@@ -10,6 +10,26 @@ const JWT_SECRET = process.env.JWT_SECRET || "dev-secret-change-me";
 export const AUTH_DISABLED =
   process.env.AUTH_DISABLED === "true" || !useDatabase;
 
+const PLACEHOLDER_JWT_SECRETS = new Set(["dev-secret-change-me", "change-me-in-development", "change-me"]);
+
+/**
+ * Fail fast in production: multi-user isolation must be on with a real
+ * JWT_SECRET. Mirrors the ADMIN_KEY startup check.
+ */
+export function assertAuthSafety(): void {
+  if (process.env.NODE_ENV !== "production") return;
+  if (AUTH_DISABLED) {
+    throw new Error(
+      "[auth] AUTH_DISABLED=true is not allowed in production — set AUTH_DISABLED=false (multi-user isolation) and a strong JWT_SECRET."
+    );
+  }
+  if (!process.env.JWT_SECRET || PLACEHOLDER_JWT_SECRETS.has(process.env.JWT_SECRET)) {
+    throw new Error(
+      "[auth] JWT_SECRET must be set to a strong random value in production (placeholder values are refused)."
+    );
+  }
+}
+
 export type AuthUser = {
   id: string;
   email: string;
