@@ -8,13 +8,38 @@ import { trackRunStarted, trackRunFinished } from "./metrics.js";
 import { dbMode } from "./db.js";
 import type { Test, TestRun, Schedule, Team, Project } from "@flowguard/shared";
 
-const ADMIN_KEY = process.env.ADMIN_KEY || "flowguard-admin";
+const DEFAULT_ADMIN_KEY = "flowguard-admin";
+const ADMIN_KEY = process.env.ADMIN_KEY || DEFAULT_ADMIN_KEY;
+
+/**
+ * Fail fast in production when ADMIN_KEY is missing or left at the guessable
+ * default. Reads env dynamically so it can be asserted in tests.
+ */
+export function assertAdminKeyConfigured(): void {
+  if (process.env.NODE_ENV !== "production") return;
+  const k = process.env.ADMIN_KEY || "";
+  if (!k || k === DEFAULT_ADMIN_KEY) {
+    throw new Error(
+      "[admin] ADMIN_KEY must be set to a strong random value in production — the default 'flowguard-admin' is refused."
+    );
+  }
+}
 
 /** Gate for /api/admin/* — requires the X-Admin-Key header. */
 export function requireAdminKey(req: Request, res: Response, next: NextFunction) {
   const key = req.headers["x-admin-key"];
   if (key !== ADMIN_KEY) return res.status(401).json({ error: "Invalid admin key" });
   next();
+}
+
+function pageParams(query: any) {
+  const limit = Math.min(Math.max(Number(query.limit) || 50, 1), 200);
+  const offset = Math.max(Number(query.offset) || 0, 0);
+  return { limit, offset };
+}
+
+function paginate<T>(arr: T[], limit: number, offset: number) {
+  return { items: arr.slice(offset, offset + limit), total: arr.length, limit, offset };
 }
 
 export const adminRouter = Router();
@@ -55,17 +80,19 @@ adminRouter.get("/overview", async (_req, res) => {
     return nowMs - t > STUCK_MS;
   });
 
+  const testNameById = new Map(tests.map((t) => [t.id, t.name] as const));
+  const projectNameById = new Map(projects.map((p) => [p.id, p.name] as const));
+
+  const latestByTest = new Map<string, TestRun>();
+  for (const r of runs) if (!latestByTest.has(r.testId)) latestByTest.set(r.testId, r);
+
   const failingTests = tests
-    .map((t) => {
-      const truns = runs.filter((r) => r.testId === t.id);
-      const latest = truns[0];
-      return { t, latest };
-    })
+    .map((t) => ({ t, latest: latestByTest.get(t.id) }))
     .filter((x) => x.latest && (x.latest.status === "failed" || x.latest.status === "error"))
     .map((x) => ({
       id: x.t.id,
       name: x.t.name,
-      projectName: projects.find((p) => p.id === x.t.projectId)?.name,
+      projectName: projectNameById.get(x.t.projectId),
       lastStatus: x.latest!.status,
       lastRunAt: x.latest!.finishedAt || x.latest!.createdAt,
     }))
@@ -113,7 +140,7 @@ adminRouter.get("/overview", async (_req, res) => {
     finishedRuns: finished.length,
     stuckRuns: stuckRuns.map((r) => ({
       id: r.id,
-      testName: tests.find((t) => t.id === r.testId)?.name,
+      testName: testNameById.get(r.testId),
       status: r.status,
       runningSince: r.startedAt || r.createdAt,
     })),
@@ -130,7 +157,7 @@ adminRouter.get("/overview", async (_req, res) => {
   });
 });
 
-adminRouter.get("/projects", async (_req, res) => {
+adminRouter.get("/projects", async (req, res) => {
   const projects: Project[] = await repo.listProjects();
   const out = [];
   for (const p of projects) {
@@ -145,10 +172,11 @@ adminRouter.get("/projects", async (_req, res) => {
       runCount,
     });
   }
-  res.json(out);
+  const { limit, offset } = pageParams(req.query);
+  res.json(paginate(out, limit, offset));
 });
 
-adminRouter.get("/tests", async (_req, res) => {
+adminRouter.get("/tests", async (req, res) => {
   const projects: Project[] = await repo.listProjects();
   const tests: Test[] = [];
   for (const p of projects) tests.push(...(await repo.listTests(p.id)));
@@ -179,7 +207,8 @@ adminRouter.get("/tests", async (_req, res) => {
       };
     })
   );
-  res.json(out);
+  const { limit, offset } = pageParams(req.query);
+  res.json(paginate(out, limit, offset));
 });
 
 adminRouter.get("/runs", async (req, res) => {
@@ -187,28 +216,28 @@ adminRouter.get("/runs", async (req, res) => {
   const tests: Test[] = [];
   for (const p of projects) tests.push(...(await repo.listTests(p.id)));
   const runs: TestRun[] = await repo.listRuns();
-  const limit = Math.min(Number(req.query.limit) || 200, 1000);
-  res.json(runs.slice(0, limit).map(joinNames(projects, tests)));
+  const { limit, offset } = pageParams(req.query);
+  res.json(paginate(runs.map(joinNames(projects, tests)), limit, offset));
 });
 
-adminRouter.get("/schedules", async (_req, res) => {
+adminRouter.get("/schedules", async (req, res) => {
   const projects: Project[] = await repo.listProjects();
   const tests: Test[] = [];
   for (const p of projects) tests.push(...(await repo.listTests(p.id)));
   const schedules: Schedule[] = await repo.listSchedules();
-  res.json(
-    schedules.map((s) => {
-      const test = tests.find((t) => t.id === s.testId);
-      return {
-        ...s,
-        testName: test?.name,
-        projectName: projects.find((p) => p.id === test?.projectId)?.name,
-      };
-    })
-  );
+  const out = schedules.map((s) => {
+    const test = tests.find((t) => t.id === s.testId);
+    return {
+      ...s,
+      testName: test?.name,
+      projectName: projects.find((p) => p.id === test?.projectId)?.name,
+    };
+  });
+  const { limit, offset } = pageParams(req.query);
+  res.json(paginate(out, limit, offset));
 });
 
-adminRouter.get("/teams", async (_req, res) => {
+adminRouter.get("/teams", async (req, res) => {
   const teams: Team[] = await repo.listTeams();
   const out = [];
   for (const t of teams) {
@@ -223,17 +252,18 @@ adminRouter.get("/teams", async (_req, res) => {
       projectCount: memberProjects.length,
     });
   }
-  res.json(out);
+  const { limit, offset } = pageParams(req.query);
+  res.json(paginate(out, limit, offset));
 });
 
-adminRouter.get("/users", async (_req, res) => {
+adminRouter.get("/users", async (req, res) => {
   const users = await listUsers();
-  res.json(
-    users.map((u) => ({
-      ...u,
-      apiKey: u.apiKey ? `${u.apiKey.slice(0, 4)}…${u.apiKey.slice(-4)}` : undefined,
-    }))
-  );
+  const out = users.map((u) => ({
+    ...u,
+    apiKey: u.apiKey ? `${u.apiKey.slice(0, 4)}…${u.apiKey.slice(-4)}` : undefined,
+  }));
+  const { limit, offset } = pageParams(req.query);
+  res.json(paginate(out, limit, offset));
 });
 
 adminRouter.delete("/projects/:id", async (req, res) => {
@@ -314,11 +344,15 @@ type Joined = TestRun & {
 };
 
 function joinNames(projects: Project[], tests: Test[]) {
+  const projNameById = new Map(projects.map((p) => [p.id, p.name] as const));
+  const testById = new Map(tests.map((t) => [t.id, t] as const));
   return (run: TestRun): Joined => {
-    const test = tests.find((t) => t.id === run.testId);
-    const project = test
-      ? projects.find((p) => p.id === test.projectId)
-      : undefined;
-    return { ...run, testName: test?.name, projectName: project?.name, projectId: test?.projectId };
+    const test = testById.get(run.testId);
+    return {
+      ...run,
+      testName: test?.name,
+      projectName: test ? projNameById.get(test.projectId) : undefined,
+      projectId: test?.projectId,
+    };
   };
 }

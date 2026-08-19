@@ -174,13 +174,12 @@ export const api = {
   admin: {
     config: () => adminRequest<any>("/api/admin/config"),
     overview: () => adminRequest<any>("/api/admin/overview"),
-    projects: () => adminRequest<any[]>("/api/admin/projects"),
-    tests: () => adminRequest<any[]>("/api/admin/tests"),
-    runs: (limit?: number) =>
-      adminRequest<any[]>(`/api/admin/runs${limit ? `?limit=${limit}` : ""}`),
-    schedules: () => adminRequest<any[]>("/api/admin/schedules"),
-    teams: () => adminRequest<any[]>("/api/admin/teams"),
-    users: () => adminRequest<any[]>("/api/admin/users"),
+    projects: (p?: AdminPage) => adminRequest<any>(`/api/admin/projects${adminPageQuery(p)}`),
+    tests: (p?: AdminPage) => adminRequest<any>(`/api/admin/tests${adminPageQuery(p)}`),
+    runs: (p?: AdminPage) => adminRequest<any>(`/api/admin/runs${adminPageQuery(p)}`),
+    schedules: (p?: AdminPage) => adminRequest<any>(`/api/admin/schedules${adminPageQuery(p)}`),
+    teams: (p?: AdminPage) => adminRequest<any>(`/api/admin/teams${adminPageQuery(p)}`),
+    users: (p?: AdminPage) => adminRequest<any>(`/api/admin/users${adminPageQuery(p)}`),
     deleteProject: (id: string) =>
       adminRequest<void>(`/api/admin/projects/${id}`, { method: "DELETE" }),
     deleteTest: (id: string) =>
@@ -207,4 +206,15 @@ async function adminRequest<T>(path: string, options?: RequestInit): Promise<T> 
     ...options,
     headers: { "x-admin-key": key, ...(options?.headers || {}) },
   });
+}
+
+export type AdminPage = { limit?: number; offset?: number };
+
+function adminPageQuery(p?: AdminPage): string {
+  if (!p) return "";
+  const s = new URLSearchParams();
+  if (p.limit != null) s.set("limit", String(p.limit));
+  if (p.offset != null) s.set("offset", String(p.offset));
+  const q = s.toString();
+  return q ? `?${q}` : "";
 }

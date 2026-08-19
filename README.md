@@ -33,6 +33,7 @@ copy /Y .env.example .env
 USE_DATABASE=mongo
 MONGODB_URL=mongodb://127.0.0.1:27017/flowguard
 AUTH_DISABLED=true
+ADMIN_KEY=change-me-to-a-long-random-value
 ```
 
 Atlas:
@@ -41,6 +42,7 @@ Atlas:
 USE_DATABASE=mongo
 MONGODB_URL=mongodb+srv://USER:PASS@cluster0.xxxxx.mongodb.net/flowguard
 AUTH_DISABLED=true
+ADMIN_KEY=change-me-to-a-long-random-value
 ```
 
 ### Run
@@ -86,6 +88,35 @@ Users store in Mongo `users` collection when `USE_DATABASE=mongo`. Auth supports
 JWT (`Authorization: Bearer …`) and API key (`x-api-key`). Each user only sees
 their own projects (multi-user isolation). Legacy projects created before
 ownership was added remain visible to everyone.
+
+> **Production:** set `AUTH_DISABLED=false` and a strong `JWT_SECRET`. On first
+> boot with auth enabled, register the first user via
+> `POST /api/auth/register` (or the web sign-in page — it falls back to
+> registration when the account doesn't exist). Keep `ADMIN_KEY` set to a
+> strong value — the admin panel is a global operator view that bypasses
+> per-user scoping. The API refuses to start in production with `ADMIN_KEY`
+> unset or set to the default `flowguard-admin`.
+
+---
+
+## Admin panel
+
+`http://localhost:3000/admin` is gated by the `X-Admin-Key` header (set from
+the `ADMIN_KEY` env var on the API). The first visit prompts for the key; it is
+remembered in the browser (`localStorage`) and can be cleared with
+**Disconnect**.
+
+Two views:
+
+- **Simple dashboard** — non-technical overview: pass rate, test/project counts,
+  active auto-runs, alerts sent, a 7-day activity chart, "needs attention"
+  items, recent runs, and a collapsed technical details table.
+- **Advanced (full control)** — all tables (projects, tests, runs, schedules,
+  teams, users) with per-row **Run**/**Delete**, plus metric cards. Lists are
+  paginated (25/page) so they stay fast as data grows.
+
+Admin routes live under `/api/admin/*` and are **separate from user auth** — the
+admin key is the only gate, so treat it as a shared operator secret.
 
 ---
 
@@ -133,6 +164,7 @@ then optionally **Push steps to test** with the API URL + test ID + API key
 2. Set env vars in the dashboard:
    - `MONGODB_URL` → your Atlas connection string
    - `AUTH_DISABLED=false`, `JWT_SECRET` (long random)
+   - `ADMIN_KEY` → strong random value (refused in production if unset/default)
    - `PUBLIC_URL`, `SMTP_*`, `EMAIL_FROM` (optional, for alerts)
    - `ARTIFACTS_DIR` → persistent volume path if you want screenshots to survive restarts
 

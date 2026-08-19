@@ -1,7 +1,7 @@
-import { describe, it, expect, beforeAll } from "vitest";
+import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import request from "supertest";
 import express from "express";
-import { adminRouter, requireAdminKey } from "../src/admin.js";
+import { adminRouter, requireAdminKey, assertAdminKeyConfigured } from "../src/admin.js";
 import { store } from "../src/store.js";
 
 function buildApp() {
@@ -63,8 +63,9 @@ describe("admin router", () => {
       .get("/api/admin/projects")
       .set("x-admin-key", "flowguard-admin");
     expect(res.status).toBe(200);
-    expect(Array.isArray(res.body)).toBe(true);
-    const p = res.body.find((x: any) => x.name === "AdminTest Project");
+    expect(res.body).toHaveProperty("items");
+    expect(res.body).toHaveProperty("total");
+    const p = res.body.items.find((x: any) => x.name === "AdminTest Project");
     expect(p).toBeDefined();
     expect(p.environmentCount).toBe(1);
     expect(p.testCount).toBe(1);
@@ -75,10 +76,70 @@ describe("admin router", () => {
       .get("/api/admin/teams")
       .set("x-admin-key", "flowguard-admin");
     expect(res.status).toBe(200);
-    const names = res.body.map((t: any) => t.name);
+    const names = res.body.items.map((t: any) => t.name);
     expect(names).toContain("AdminTest Team");
     expect(names).toContain("AdminTest Team 2");
-    expect(res.body.every((t: any) => typeof t.memberCount === "number")).toBe(true);
+    expect(res.body.items.every((t: any) => typeof t.memberCount === "number")).toBe(true);
+  });
+
+  it("paginates admin lists with limit/offset and total", async () => {
+    const res = await request(app)
+      .get("/api/admin/projects?limit=1&offset=0")
+      .set("x-admin-key", "flowguard-admin");
+    expect(res.status).toBe(200);
+    expect(res.body.items.length).toBe(1);
+    expect(res.body.total).toBeGreaterThanOrEqual(1);
+    expect(res.body.limit).toBe(1);
+    expect(res.body.offset).toBe(0);
+
+    const runs = await request(app)
+      .get("/api/admin/runs?limit=5")
+      .set("x-admin-key", "flowguard-admin");
+    expect(runs.status).toBe(200);
+    expect(runs.body.items.length).toBeGreaterThanOrEqual(1);
+    expect(runs.body.total).toBeGreaterThanOrEqual(1);
+    expect(runs.body.items[0]).toHaveProperty("testName");
+  });
+
+  it("caps admin pagination limit at 200", async () => {
+    const res = await request(app)
+      .get("/api/admin/users?limit=9999")
+      .set("x-admin-key", "flowguard-admin");
+    expect(res.status).toBe(200);
+    expect(res.body.limit).toBe(200);
+  });
+
+  describe("assertAdminKeyConfigured", () => {
+    const origNodeEnv = process.env.NODE_ENV;
+
+    afterAll(() => {
+      process.env.NODE_ENV = origNodeEnv;
+      process.env.ADMIN_KEY = "";
+    });
+
+    it("refuses to start in production without ADMIN_KEY", () => {
+      process.env.NODE_ENV = "production";
+      process.env.ADMIN_KEY = "";
+      expect(assertAdminKeyConfigured).toThrow(/ADMIN_KEY/);
+    });
+
+    it("refuses the default admin key in production", () => {
+      process.env.NODE_ENV = "production";
+      process.env.ADMIN_KEY = "flowguard-admin";
+      expect(assertAdminKeyConfigured).toThrow(/ADMIN_KEY/);
+    });
+
+    it("allows a strong ADMIN_KEY in production", () => {
+      process.env.NODE_ENV = "production";
+      process.env.ADMIN_KEY = "s3cr3t-custom-value";
+      expect(() => assertAdminKeyConfigured()).not.toThrow();
+    });
+
+    it("does not block dev when ADMIN_KEY unset", () => {
+      process.env.NODE_ENV = "test";
+      process.env.ADMIN_KEY = "";
+      expect(() => assertAdminKeyConfigured()).not.toThrow();
+    });
   });
 
   it("returns 404 for missing deletes", async () => {

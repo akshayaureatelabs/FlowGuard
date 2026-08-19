@@ -38,7 +38,7 @@ import {
   AUTH_DISABLED,
 } from "./auth.js";
 import { openApiSpec } from "./openapi.js";
-import { adminRouter, requireAdminKey } from "./admin.js";
+import { adminRouter, requireAdminKey, assertAdminKeyConfigured } from "./admin.js";
 import {
   trackRequest,
   trackRunStarted,
@@ -684,6 +684,12 @@ async function start() {
       process.exit(1);
     }
   }
+  try {
+    assertAdminKeyConfigured();
+  } catch (err: any) {
+    console.error(err?.message || err);
+    process.exit(1);
+  }
   app.listen(PORT, () => {
     console.log(`FlowGuard API listening on http://localhost:${PORT}`);
     console.log(`Docs: http://localhost:${PORT}/docs`);
@@ -692,7 +698,7 @@ async function start() {
     console.log(`USE_LOCAL_EXECUTION=${process.env.USE_LOCAL_EXECUTION ?? "true"}`);
     if (!process.env.ADMIN_KEY) {
       console.warn(
-        "[admin] ADMIN_KEY not set — using default 'flowguard-admin'. Set ADMIN_KEY in production."
+        "[admin] ADMIN_KEY not set — using default 'flowguard-admin' (dev only). Set ADMIN_KEY in production."
       );
     }
   });

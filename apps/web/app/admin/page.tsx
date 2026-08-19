@@ -18,6 +18,19 @@ const TABS: { id: Tab; label: string }[] = [
 
 const VIEW_KEY = "fg_admin_view";
 
+const PAGE_LIMIT = 25;
+type TabPage = { limit: number; offset: number };
+type PageState = Record<Tab, TabPage>;
+const INITIAL_PAGES: PageState = {
+  overview: { limit: PAGE_LIMIT, offset: 0 },
+  projects: { limit: PAGE_LIMIT, offset: 0 },
+  tests: { limit: PAGE_LIMIT, offset: 0 },
+  runs: { limit: PAGE_LIMIT, offset: 0 },
+  schedules: { limit: PAGE_LIMIT, offset: 0 },
+  teams: { limit: PAGE_LIMIT, offset: 0 },
+  users: { limit: PAGE_LIMIT, offset: 0 },
+};
+
 function timeAgo(iso?: string): string {
   if (!iso) return "—";
   const t = new Date(iso).getTime();
@@ -100,25 +113,26 @@ export default function AdminPage() {
   const [data, setData] = useState<any>({});
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+  const [pg, setPg] = useState<PageState>(INITIAL_PAGES);
 
-  const load = useCallback(async (tab: Tab) => {
+  const load = useCallback(async (tab: Tab, page?: TabPage) => {
     setError("");
     setLoading(true);
     try {
       const fn =
         tab === "overview"
-          ? api.admin.overview
+          ? () => api.admin.overview()
           : tab === "projects"
-          ? api.admin.projects
+          ? () => api.admin.projects(page)
           : tab === "tests"
-          ? api.admin.tests
+          ? () => api.admin.tests(page)
           : tab === "runs"
-          ? api.admin.runs
+          ? () => api.admin.runs(page)
           : tab === "schedules"
-          ? api.admin.schedules
+          ? () => api.admin.schedules(page)
           : tab === "teams"
-          ? api.admin.teams
-          : api.admin.users;
+          ? () => api.admin.teams(page)
+          : () => api.admin.users(page);
       const res = await fn();
       setData((d: any) => ({ ...d, [tab]: res }));
     } catch (e: any) {
@@ -146,12 +160,26 @@ export default function AdminPage() {
       localStorage.setItem(VIEW_KEY, v);
     } catch { /* ignore */ }
     if (v === "simple" && !data.overview) load("overview");
-    if (v === "advanced" && activeTab !== "overview" && !(activeTab in data)) load(activeTab);
+    if (v === "advanced" && activeTab !== "overview" && !(activeTab in data)) {
+      const p = pg[activeTab];
+      load(activeTab, { limit: p.limit, offset: 0 });
+    }
   };
 
   const switchTab = (tab: Tab) => {
     setActiveTab(tab);
-    if (!(tab in data)) load(tab);
+    if (tab === "overview") {
+      if (!data.overview) load("overview");
+      return;
+    }
+    const p = pg[tab];
+    setPg((prev) => ({ ...prev, [tab]: { ...prev[tab], offset: 0 } }));
+    load(tab, { limit: p.limit, offset: 0 });
+  };
+
+  const jump = (tab: Tab, offset: number) => {
+    setPg((prev) => ({ ...prev, [tab]: { ...prev[tab], offset } }));
+    load(tab, { limit: pg[tab].limit, offset });
   };
 
   const saveKey = async () => {
@@ -191,8 +219,9 @@ export default function AdminPage() {
         await load("overview");
         return;
       }
-      await load(reload);
-      const other = reload === "projects" ? "tests" : reload === "tests" ? "runs" : reload;
+      const p = pg[reload];
+      setPg((prev) => ({ ...prev, [reload]: { ...prev[reload], offset: 0 } }));
+      await load(reload, { limit: p.limit, offset: 0 });
       if (kind === "test") setData((d: any) => ({ ...d, runs: undefined }));
       if (kind !== reload && reload === "tests") setData((d: any) => ({ ...d, overview: undefined }));
     } catch (e: any) {
@@ -212,7 +241,8 @@ export default function AdminPage() {
       await api.admin.runTest(t.id, env.id);
       setData((d: any) => ({ ...d, runs: undefined, overview: undefined }));
       setActiveTab("runs");
-      await load("runs");
+      setPg((prev) => ({ ...prev, runs: { ...prev.runs, offset: 0 } }));
+      await load("runs", { limit: PAGE_LIMIT, offset: 0 });
       alert("Run started — you'll see the result in Runs.");
     } catch (e: any) {
       setError(e.message);
@@ -301,6 +331,8 @@ export default function AdminPage() {
               runTest={runTest}
               del={del}
               load={load}
+              pg={pg}
+              jump={jump}
             />
           )}
         </>
@@ -537,8 +569,26 @@ function SimpleDashboard({ o, onRefresh, goAdvanced }: { o: any; onRefresh: () =
   );
 }
 
+function Pager({ data, page, onPage }: { data: any; page: TabPage; onPage: (offset: number) => void }) {
+  const total = data?.total ?? 0;
+  const { limit, offset } = page;
+  const from = total ? offset + 1 : 0;
+  const to = Math.min(offset + limit, total);
+  return (
+    <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "0.7rem 1rem", borderTop: "1px solid var(--border)" }}>
+      <span className="muted" style={{ fontSize: "0.8rem" }}>
+        {total ? `Showing ${from}–${to} of ${total}` : "No items"}
+      </span>
+      <span style={{ marginLeft: "auto", display: "flex", gap: 6 }}>
+        <button className="btn btn-ghost btn-sm" disabled={offset <= 0} onClick={() => onPage(Math.max(0, offset - limit))}>Prev</button>
+        <button className="btn btn-ghost btn-sm" disabled={offset + limit >= total} onClick={() => onPage(offset + limit)}>Next</button>
+      </span>
+    </div>
+  );
+}
+
 function AdvancedView({
-  activeTab, switchTab, data, o, counts, health, runTest, del, load,
+  activeTab, switchTab, data, o, counts, health, runTest, del, load, pg, jump,
 }: {
   activeTab: Tab;
   switchTab: (t: Tab) => void;
@@ -549,6 +599,8 @@ function AdvancedView({
   runTest: (t: any) => void;
   del: (kind: string, id: string, label: string, reload: Tab) => void;
   load: (t: Tab) => void;
+  pg: PageState;
+  jump: (t: Tab, offset: number) => void;
 }) {
   const metrics = o?.metrics || {};
   void health;
@@ -607,13 +659,14 @@ function AdvancedView({
       )}
 
       {activeTab === "projects" && (
+        <>
         <div className="panel-box" style={{ padding: 0, overflow: "auto" }}>
           <table className="table">
             <thead>
               <tr><th>Name</th><th>Owner</th><th>Team</th><th className="cell-num">Envs</th><th className="cell-num">Tests</th><th className="cell-num">Runs</th><th>Created</th><th></th></tr>
             </thead>
             <tbody>
-              {(data.projects || []).map((p: any) => (
+              {(data.projects?.items || []).map((p: any) => (
                 <tr key={p.id}>
                   <td><a href={`/projects/${p.id}`}>{p.name}</a></td>
                   <td className="muted">{p.ownerId || "—"}</td>
@@ -630,16 +683,19 @@ function AdvancedView({
             </tbody>
           </table>
         </div>
+        <Pager data={data.projects} page={pg.projects} onPage={(o) => jump("projects", o)} />
+        </>
       )}
 
       {activeTab === "tests" && (
+        <>
         <div className="panel-box" style={{ padding: 0, overflow: "auto" }}>
           <table className="table">
             <thead>
               <tr><th>Name</th><th>Project</th><th className="cell-num">Steps</th><th className="cell-num">Schedules</th><th className="cell-num">Runs</th><th>Last status</th><th>Last run</th><th></th></tr>
             </thead>
             <tbody>
-              {(data.tests || []).map((t: any) => (
+              {(data.tests?.items || []).map((t: any) => (
                 <tr key={t.id}>
                   <td><a href={`/tests/${t.id}`}>{t.name}</a></td>
                   <td className="muted">{t.projectName || "—"}</td>
@@ -657,16 +713,19 @@ function AdvancedView({
             </tbody>
           </table>
         </div>
+        <Pager data={data.tests} page={pg.tests} onPage={(o) => jump("tests", o)} />
+        </>
       )}
 
       {activeTab === "runs" && (
+        <>
         <div className="panel-box" style={{ padding: 0, overflow: "auto" }}>
           <table className="table">
             <thead>
               <tr><th>Test</th><th>Project</th><th>Status</th><th>Started</th><th>Finished</th><th>Error</th><th></th></tr>
             </thead>
             <tbody>
-              {(data.runs || []).map((r: any) => (
+              {(data.runs?.items || []).map((r: any) => (
                 <tr key={r.id}>
                   <td><a href={`/tests/${r.testId}`}>{r.testName || r.testId.slice(0, 8)}</a></td>
                   <td className="muted">{r.projectName || "—"}</td>
@@ -682,16 +741,19 @@ function AdvancedView({
             </tbody>
           </table>
         </div>
+        <Pager data={data.runs} page={pg.runs} onPage={(o) => jump("runs", o)} />
+        </>
       )}
 
       {activeTab === "schedules" && (
+        <>
         <div className="panel-box" style={{ padding: 0, overflow: "auto" }}>
           <table className="table">
             <thead>
               <tr><th>Test</th><th>Project</th><th>Schedule</th><th>Enabled</th><th>Last status</th><th className="cell-num">Runs</th><th>Next run</th><th>Last error</th><th></th></tr>
             </thead>
             <tbody>
-              {(data.schedules || []).map((s: any) => (
+              {(data.schedules?.items || []).map((s: any) => (
                 <tr key={s.id}>
                   <td><a href={`/tests/${s.testId}`}>{s.testName || s.testId.slice(0, 8)}</a></td>
                   <td className="muted">{s.projectName || "—"}</td>
@@ -709,16 +771,19 @@ function AdvancedView({
             </tbody>
           </table>
         </div>
+        <Pager data={data.schedules} page={pg.schedules} onPage={(o) => jump("schedules", o)} />
+        </>
       )}
 
       {activeTab === "teams" && (
+        <>
         <div className="panel-box" style={{ padding: 0, overflow: "auto" }}>
           <table className="table">
             <thead>
               <tr><th>Name</th><th>Owner</th><th className="cell-num">Members</th><th className="cell-num">Invites</th><th className="cell-num">Projects</th><th>Created</th><th></th></tr>
             </thead>
             <tbody>
-              {(data.teams || []).map((t: any) => (
+              {(data.teams?.items || []).map((t: any) => (
                 <tr key={t.id}>
                   <td><a href="/teams">{t.name}</a></td>
                   <td className="muted">{t.createdBy || "—"}</td>
@@ -734,16 +799,19 @@ function AdvancedView({
             </tbody>
           </table>
         </div>
+        <Pager data={data.teams} page={pg.teams} onPage={(o) => jump("teams", o)} />
+        </>
       )}
 
       {activeTab === "users" && (
+        <>
         <div className="panel-box" style={{ padding: 0, overflow: "auto" }}>
           <table className="table">
             <thead>
               <tr><th>Email</th><th>Name</th><th>API key</th><th>ID</th><th>Created</th><th></th></tr>
             </thead>
             <tbody>
-              {(data.users || []).map((u: any) => (
+              {(data.users?.items || []).map((u: any) => (
                 <tr key={u.id}>
                   <td>{u.email}</td>
                   <td className="muted">{u.name || "—"}</td>
@@ -758,6 +826,8 @@ function AdvancedView({
             </tbody>
           </table>
         </div>
+        <Pager data={data.users} page={pg.users} onPage={(o) => jump("users", o)} />
+        </>
       )}
     </>
   );
