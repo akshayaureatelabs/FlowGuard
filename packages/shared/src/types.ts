@@ -168,11 +168,8 @@ export const ProjectSchema = z.object({
   id: z.string(),
   name: z.string().min(1),
   ownerId: z.string().optional(),
-  /** When set, the project belongs to a team; team members share access. */
   teamId: z.string().optional(),
-  /** Project-level alert email (single address). */
   notifyEmail: z.string().email().optional(),
-  /** Project-level alert webhook URL. */
   notifyWebhook: z.string().url().optional(),
   createdAt: z.string(),
   updatedAt: z.string(),
@@ -192,7 +189,6 @@ export type Environment = z.infer<typeof EnvironmentSchema>;
 
 export const TestSettingsSchema = z.object({
   browser: z.enum(["chrome", "firefox", "edge", "safari"]).optional(),
-  /** Playwright grid / remote endpoint. ws://wss:// → connect(), http(s):// → CDP. */
   remoteUrl: z.string().optional(),
   viewport: z
     .object({
@@ -202,6 +198,10 @@ export const TestSettingsSchema = z.object({
     .optional(),
   geolocation: z.string().optional(),
   parallel: z.boolean().optional(),
+  /** Record Playwright video for the run (webm). */
+  recordVideo: z.boolean().optional(),
+  /** Dataset id for data-driven runs (rows merged into env vars). */
+  datasetId: z.string().optional(),
 });
 export type TestSettings = z.infer<typeof TestSettingsSchema>;
 
@@ -216,6 +216,17 @@ export const TestSchema = z.object({
 });
 export type Test = z.infer<typeof TestSchema>;
 
+/** Snapshot of steps when a test is saved (version history). */
+export const TestVersionSchema = z.object({
+  id: z.string(),
+  testId: z.string(),
+  label: z.string().optional(),
+  steps: z.array(StepSchema),
+  settings: TestSettingsSchema.optional(),
+  createdAt: z.string(),
+});
+export type TestVersion = z.infer<typeof TestVersionSchema>;
+
 export const ModuleSchema = z.object({
   id: z.string(),
   projectId: z.string(),
@@ -226,6 +237,29 @@ export const ModuleSchema = z.object({
 });
 export type Module = z.infer<typeof ModuleSchema>;
 
+/** Ordered group of tests run sequentially under one environment. */
+export const SuiteSchema = z.object({
+  id: z.string(),
+  projectId: z.string(),
+  name: z.string().min(1),
+  testIds: z.array(z.string()).default([]),
+  createdAt: z.string(),
+  updatedAt: z.string(),
+});
+export type Suite = z.infer<typeof SuiteSchema>;
+
+/** CSV-style data table for data-driven tests. */
+export const DatasetSchema = z.object({
+  id: z.string(),
+  projectId: z.string(),
+  name: z.string().min(1),
+  columns: z.array(z.string()).default([]),
+  rows: z.array(z.record(z.string())).default([]),
+  createdAt: z.string(),
+  updatedAt: z.string(),
+});
+export type Dataset = z.infer<typeof DatasetSchema>;
+
 export const ScheduleSchema = z.object({
   id: z.string(),
   testId: z.string(),
@@ -235,9 +269,7 @@ export const ScheduleSchema = z.object({
   cron: z.string().optional(),
   notifyEmail: z.string().optional(),
   notifyWebhook: z.string().optional(),
-  /** Number of automatic retries after a failed scheduled run (default 1). */
   maxRetries: z.number().int().min(0).optional(),
-  /** Current retry attempt for the most recent failed run. */
   retryCount: z.number().int().min(0).optional(),
   lastRunStatus: z.enum(["passed", "failed", "error"]).optional(),
   lastError: z.string().optional(),
@@ -272,9 +304,12 @@ export const TestRunSchema = z.object({
       video: z.string().optional(),
       finalScreenshot: z.string().optional(),
       visualDiff: z.string().optional(),
+      s3: z.record(z.string()).optional(),
     })
     .optional(),
   error: z.string().optional(),
+  /** Present when this run is one row of a data-driven execution. */
+  dataRowIndex: z.number().int().optional(),
   createdAt: z.string(),
 });
 export type TestRun = z.infer<typeof TestRunSchema>;
@@ -349,7 +384,11 @@ export const CreateEnvironmentBody = z.object({
 });
 export const CreateTestBody = z.object({ name: z.string().min(1) });
 export const UpdateStepsBody = z.object({ steps: z.array(StepSchema) });
-export const CreateRunBody = z.object({ environmentId: z.string().min(1) });
+export const CreateRunBody = z.object({
+  environmentId: z.string().min(1),
+  /** Optional: run only this dataset row index (data-driven). */
+  dataRowIndex: z.number().int().min(0).optional(),
+});
 export const CreateModuleBody = z.object({ name: z.string().min(1) });
 export const CreateScheduleBody = z.object({
   testId: z.string().min(1),
@@ -362,3 +401,26 @@ export const CreateScheduleBody = z.object({
   maxRetries: z.number().int().min(0).optional(),
 });
 export const UpdateTestSettingsBody = TestSettingsSchema;
+
+export const CreateSuiteBody = z.object({
+  name: z.string().min(1),
+  testIds: z.array(z.string()).optional(),
+});
+export const UpdateSuiteBody = z.object({
+  name: z.string().min(1).optional(),
+  testIds: z.array(z.string()).optional(),
+});
+export const RunSuiteBody = z.object({
+  environmentId: z.string().min(1),
+});
+
+export const CreateDatasetBody = z.object({
+  name: z.string().min(1),
+  columns: z.array(z.string()).optional(),
+  rows: z.array(z.record(z.string())).optional(),
+});
+export const UpdateDatasetBody = z.object({
+  name: z.string().min(1).optional(),
+  columns: z.array(z.string()).optional(),
+  rows: z.array(z.record(z.string())).optional(),
+});
