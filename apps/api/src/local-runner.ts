@@ -7,6 +7,7 @@ import AxeBuilder from "@axe-core/playwright";
 import type { Test, Environment, Step, StepResult, Module, Selector } from "@flowguard/shared";
 import { repo } from "./repo.js";
 import { trackRunFinished } from "./metrics.js";
+import { s3Enabled, uploadRunDir } from "./s3-artifacts.js";
 
 export const ARTIFACTS_DIR =
   process.env.ARTIFACTS_DIR || path.join(process.cwd(), "artifacts");
@@ -32,7 +33,7 @@ const AXE_TAGS: Record<string, string[]> = {
   wcag2a: ["wcag2a"],
   wcag2aa: ["wcag2a", "wcag2aa"],
   wcag21aa: ["wcag2a", "wcag2aa", "wcag21aa"],
-}
+};
 
 interface HealInfo {
   from?: string;
@@ -380,7 +381,6 @@ export async function launchBrowser(name: string, remoteUrl: string): Promise<Br
         name === "firefox" ? firefox : name === "safari" ? webkit : chromium;
       return bt.connect(remoteUrl);
     }
-    // http(s):// → Chrome DevTools Protocol endpoint (BrowserStack/Selenium-style).
     return chromium.connectOverCDP(remoteUrl);
   }
   switch (name) {
@@ -397,6 +397,33 @@ export async function launchBrowser(name: string, remoteUrl: string): Promise<Br
     default:
       return chromium.launch({ headless: true });
   }
+}
+
+async function maybeUploadArtifacts(
+  runId: string,
+  runDir: string,
+  results: StepResult[],
+  finalShot: string
+): Promise<{ finalScreenshot?: string; s3?: Record<string, string> }> {
+  const artifacts: { finalScreenshot?: string; s3?: Record<string, string> } = {
+    finalScreenshot: artifactUrl(finalShot),
+  };
+  if (!s3Enabled()) return artifacts;
+  try {
+    const remote = await uploadRunDir(runId, runDir);
+    if (Object.keys(remote).length) {
+      artifacts.s3 = remote;
+      if (remote["final.png"]) artifacts.finalScreenshot = remote["final.png"];
+      for (const r of results) {
+        if (!r.screenshot) continue;
+        const base = path.basename(r.screenshot);
+        if (remote[base]) r.screenshot = remote[base];
+      }
+    }
+  } catch (err) {
+    console.warn("[s3] run upload skipped", err);
+  }
+  return artifacts;
 }
 
 export async function runLocalTest(
@@ -429,7 +456,6 @@ export async function runLocalTest(
     browser = await launchBrowser(browserName, remoteUrl);
 
     const viewport = test.settings?.viewport || { width: 1280, height: 720 };
-    // CDP-connected browsers reuse the browser's existing context/page.
     const context = /^https?:/.test(remoteUrl)
       ? browser.contexts()[0] || (await browser.newContext({ viewport }))
       : await browser.newContext({ viewport });
@@ -455,12 +481,13 @@ export async function runLocalTest(
     const finalShot = path.join(runDir, "final.png");
     await page.screenshot({ path: finalShot, fullPage: true }).catch(() => {});
 
+    const artifacts = await maybeUploadArtifacts(runId, runDir, results, finalShot);
     const failed = results.some((r) => r.status === "failed");
     await repo.updateRun(runId, {
       status: failed ? "failed" : "passed",
       finishedAt: new Date().toISOString(),
       stepsResults: results,
-      artifacts: { finalScreenshot: artifactUrl(finalShot) },
+      artifacts,
     });
     trackRunFinished();
   } catch (err: any) {
