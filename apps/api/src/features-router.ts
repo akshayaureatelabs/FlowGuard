@@ -12,6 +12,7 @@ import { featuresStore } from "./features-store.js";
 import { runLocalTest } from "./local-runner.js";
 import { trackRunStarted, trackRunFinished } from "./metrics.js";
 import { notifyForRun } from "./notify.js";
+import { scheduleRunNowRouter } from "./schedule-run-now.js";
 
 export const featuresRouter = Router();
 
@@ -70,7 +71,6 @@ featuresRouter.post("/suites/:id/runs", async (req, res) => {
     const run = await repo.createRun(test.id, env.id);
     trackRunStarted();
     runs.push(run);
-    // Sequential: await each run before next
     try {
       await runLocalTest(run.id, test, env);
       await notifyForRun(run.id).catch(() => {});
@@ -166,9 +166,11 @@ featuresRouter.post("/tests/:id/versions/:versionId/restore", async (req, res) =
   const v = await featuresStore.getVersion(req.params.versionId);
   if (!v || v.testId !== test.id)
     return res.status(404).json({ error: "Version not found" });
-  // Snapshot current before restore
   await featuresStore.saveVersion(test.id, test.steps || [], test.settings, "before-restore");
   await repo.updateSteps(test.id, v.steps);
   if (v.settings) await repo.updateTestSettings(test.id, v.settings);
   res.json(await repo.getTest(test.id));
 });
+
+// ── Schedule run-now ────────────────────────────────────────────
+featuresRouter.use(scheduleRunNowRouter);
