@@ -14,6 +14,7 @@ export default function TeamsPage() {
   const [inviteRole, setInviteRole] = useState("member");
   const [newMemberId, setNewMemberId] = useState("");
   const [newMemberRole, setNewMemberRole] = useState("member");
+  const [lastInviteLink, setLastInviteLink] = useState("");
 
   const load = async () => {
     try {
@@ -60,10 +61,18 @@ export default function TeamsPage() {
     try {
       setError("");
       setMsg("");
-      await api.createTeamInvite(selected.id, inviteEmail.trim(), inviteRole);
+      setLastInviteLink("");
+      const inv = await api.createTeamInvite(selected.team.id, inviteEmail.trim(), inviteRole);
       setInviteEmail("");
-      setMsg(`Invite sent to ${inviteEmail.trim()}`);
-      await selectTeam(selected.id);
+      const origin = typeof window !== "undefined" ? window.location.origin : "";
+      const link = inv?.token ? `${origin}/invites/${inv.token}` : "";
+      setLastInviteLink(link);
+      setMsg(
+        link
+          ? `Invite created — copy the link below and send to ${inviteEmail.trim()}`
+          : `Invite created for ${inviteEmail.trim()}`
+      );
+      await selectTeam(selected.team.id);
     } catch (e: any) {
       setError(e.message);
     }
@@ -74,10 +83,10 @@ export default function TeamsPage() {
     try {
       setError("");
       setMsg("");
-      await api.addTeamMember(selected.id, newMemberId.trim(), newMemberRole);
+      await api.addTeamMember(selected.team.id, newMemberId.trim(), newMemberRole);
       setNewMemberId("");
       setMsg("Member added");
-      await selectTeam(selected.id);
+      await selectTeam(selected.team.id);
     } catch (e: any) {
       setError(e.message);
     }
@@ -87,8 +96,8 @@ export default function TeamsPage() {
     try {
       setError("");
       setMsg("");
-      await api.updateTeamMember(selected.id, userId, role);
-      await selectTeam(selected.id);
+      await api.updateTeamMember(selected.team.id, userId, role);
+      await selectTeam(selected.team.id);
     } catch (e: any) {
       setError(e.message);
     }
@@ -99,8 +108,8 @@ export default function TeamsPage() {
     try {
       setError("");
       setMsg("");
-      await api.removeTeamMember(selected.id, userId);
-      await selectTeam(selected.id);
+      await api.removeTeamMember(selected.team.id, userId);
+      await selectTeam(selected.team.id);
     } catch (e: any) {
       setError(e.message);
     }
@@ -109,8 +118,8 @@ export default function TeamsPage() {
   const revokeInvite = async (inviteId: string) => {
     try {
       setError("");
-      await api.revokeTeamInvite(selected.id, inviteId);
-      await selectTeam(selected.id);
+      await api.revokeTeamInvite(selected.team.id, inviteId);
+      await selectTeam(selected.team.id);
     } catch (e: any) {
       setError(e.message);
     }
@@ -128,6 +137,21 @@ export default function TeamsPage() {
 
       {error && <div className="alert-error">{error}</div>}
       {msg && <div className="alert-success">{msg}</div>}
+      {lastInviteLink && (
+        <div className="panel-box" style={{ marginBottom: 12 }}>
+          <label>Invite link (share with teammate)</label>
+          <div style={{ display: "flex", gap: 8, marginTop: 6 }}>
+            <input readOnly value={lastInviteLink} style={{ flex: 1, minWidth: 0 }} />
+            <button
+              className="btn btn-ghost"
+              type="button"
+              onClick={() => navigator.clipboard.writeText(lastInviteLink)}
+            >
+              Copy
+            </button>
+          </div>
+        </div>
+      )}
 
       <div style={{ display: "flex", gap: 16, flexWrap: "wrap", alignItems: "flex-start" }}>
         <div className="panel-box" style={{ flex: "1 1 260px", minWidth: 260 }}>
@@ -250,11 +274,17 @@ export default function TeamsPage() {
                             gap: 8,
                             padding: "6px 0",
                             borderBottom: "1px solid var(--border)",
+                            flexWrap: "wrap",
                           }}
                         >
                           <code style={{ flex: 1 }}>{i.email}</code>
                           <span className="muted">{i.role}</span>
                           <span className="muted">{i.status}</span>
+                          {i.token && (
+                            <a className="muted" href={`/invites/${i.token}`} style={{ fontSize: "0.8rem" }}>
+                              accept link
+                            </a>
+                          )}
                           {i.status === "pending" && (
                             <button className="btn btn-ghost btn-sm" style={{ color: "var(--danger)" }} onClick={() => revokeInvite(i.id)}>
                               Revoke
