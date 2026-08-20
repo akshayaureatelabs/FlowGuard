@@ -1,114 +1,109 @@
-# Deploying FlowGuard
+# Deploying FlowGuard (P0)
 
-FlowGuard is a monorepo with an Express API (`apps/api`), a Next.js web app
-(`apps/web`), and a Chrome recorder extension (`extensions/chrome`). This guide
-covers production deployment with the three recommended hosts: MongoDB Atlas
-(database), Railway (API), and Vercel (web).
-
-## Architecture
+**Order:** Atlas → Railway (API) → Vercel (web) → smoke script.
 
 ```
-Browser extension ─▶ FlowGuard API (Express) ─▶ MongoDB Atlas
-                          │  │
-                          │  └─▶ Playwright (local execution / Selenium grid / Playwright grid)
-                          └─▶ Scheduled runs (in-process scheduler, 30s tick)
+Browser / extension ──▶ API (Railway) ──▶ MongoDB Atlas
+                           │
+                           ├─ Playwright (chrome / firefox / webkit / remote grid)
+                           ├─ Scheduler (30s tick; Redis lock if REDIS_URL set)
+                           └─ Artifacts (volume and/or S3)
 ```
 
-- The API performs test runs **locally in-process** using Playwright. The
-  official Playwright Docker image ships Chrome, Firefox, and WebKit, so Safari
-  ("WebKit") tests work out of the box in the container.
-- Notifications are delivered by the API to per-schedule + per-project
-  `notifyEmail`/`notifyWebhook` targets when a run finishes (any result) or a
-  scheduled run fails.
+---
 
-## Environment variables
+## 1. MongoDB Atlas
 
-| Variable | Default | Description |
-| --- | --- | --- |
-| `PORT` | `3001` | HTTP port. Railway sets this automatically. |
-| `USE_DATABASE` | `false` (memory) | `mongo` or `true`/`postgres`. Set `mongo`. |
-| `MONGODB_URI` | — | Atlas connection string when `USE_DATABASE=mongo`. |
-| `DATABASE_URL` | — | Postgres connection string when `USE_DATABASE=postgres` (Prisma). |
-| `AUTH_DISABLED` | `true` | `false` to enable JWT login + API keys. **Set `false` in production.** |
-| `JWT_SECRET` | dev value | **Must be a long random secret in production.** |
-| `ADMIN_KEY` | `flowguard-admin` | Shared secret for the `/admin` panel (`X-Admin-Key` header). **Set a strong random value in production.** |
-| `USE_LOCAL_EXECUTION` | `true` | `false` to delegate runs to a remote runner. |
-| `PLAYWRIGHT_GRID_URL` | — | Optional Playwright/Selenium grid endpoint. `ws://`/`wss://` connects via Playwright, `http(s)://` via CDP. |
-| `ARTIFACTS_DIR` | `./artifacts` | Where screenshots/diffs/videos are stored. Use a persistent volume. |
-| `RATE_LIMIT_MAX` | `300` | API requests per minute per IP. |
-| `CORS_ORIGIN` | `*` | Restrict web origins if desired. |
+1. Free **M0** cluster → database user + password.
+2. Network Access: `0.0.0.0/0` (or Railway IPs).
+3. Connection string:
 
-## 1. Database — MongoDB Atlas
+```text
+mongodb+srv://USER:PASS@cluster0.xxxxx.mongodb.net/flowguard?retryWrites=true&w=majority
+```
 
-1. Create a free M0 cluster at https://www.mongodb.com/atlas.
-2. Add a database user and allow your API host's IP (or `0.0.0.0/0`).
-3. Copy the connection string, e.g.
-   `mongodb+srv://user:pass@cluster0.xxxxx.mongodb.net/flowguard`.
-4. Set `USE_DATABASE=mongo` and `MONGODB_URI=<connection string>` on Railway.
+Env on API: `USE_DATABASE=mongo` and `MONGODB_URL=<uri>` (repo uses **`MONGODB_URL`**, not `MONGODB_URI`).
 
-## 2. API — Railway
+---
 
-1. Create a Railway project from the repo root, **Dockerfile** (`apps/api/Dockerfile`).
-2. Add a **Volume** mounted at `/app/apps/api/artifacts` so screenshots survive redeploys.
-3. Set the environment variables from the table above.
-4. Add `PORT` (Railway injects it) and the Atlas URI.
-5. Deploy. Health check: `GET /health`.
+## 2. Railway — API
 
-Local build sanity check:
+1. Deploy from GitHub; `railway.toml` sets `rootDirectory = apps/api`.
+2. Prefer **Dockerfile** `apps/api/Dockerfile` so Playwright browsers are present.
+3. **Required variables:**
+
+| Variable | Value |
+|----------|--------|
+| `NODE_ENV` | `production` |
+| `USE_DATABASE` | `mongo` |
+| `MONGODB_URL` | Atlas URI |
+| `AUTH_DISABLED` | `false` |
+| `JWT_SECRET` | 32+ random chars |
+| `ADMIN_KEY` | strong random (not `flowguard-admin`) |
+| `CORS_ORIGINS` | `https://your-app.vercel.app` (comma-separated) |
+| `PUBLIC_URL` | `https://your-api.up.railway.app` |
+
+**Optional:**
+
+| Variable | Purpose |
+|----------|--------|
+| `REDIS_URL` | Leader lock so multi-replica schedulers don’t double-fire |
+| `ARTIFACTS_DIR` | e.g. `/data/artifacts` + **Volume** |
+| `S3_ENDPOINT` / `S3_ACCESS_KEY` / `S3_SECRET_KEY` / `S3_BUCKET` / `S3_PUBLIC_URL` | Object storage for screenshots |
+| `SMTP_*` / `EMAIL_FROM` | Email alerts |
+| `PLAYWRIGHT_GRID_URL` | Remote browsers (`ws://` Playwright or `http://` CDP) |
+
+4. Health: `GET /health` → `status: ok`, `database: mongo`, `auth: jwt+apiKey`.
+
+Production **exits on boot** if auth is disabled, JWT is a placeholder, or `ADMIN_KEY` is missing/default.
+
+---
+
+## 3. Vercel — Web
+
+1. Import repo → **Root Directory** `apps/web`.
+2. Env: `NEXT_PUBLIC_API_URL=https://<railway-api>`.
+3. Deploy → put that origin into Railway `CORS_ORIGINS`.
+
+---
+
+## 4. Post-deploy smoke
 
 ```bash
-docker build -f apps/api/Dockerfile -t flowguard-api .
-docker run --rm -p 3001:3001 \
-  -e USE_DATABASE=mongo \
-  -e MONGODB_URI="mongodb+srv://..." \
-  -e AUTH_DISABLED=false \
-  -e JWT_SECRET="$(openssl rand -hex 32)" \
-  flowguard-api
+export API_URL=https://your-api.up.railway.app
+export ADMIN_KEY=your-prod-admin-key
+node scripts/post-deploy-smoke.mjs
 ```
 
-## 3. Web — Vercel
+Manual: register on web → project → env → test → Run → `/admin` with `ADMIN_KEY`.
 
-1. Import `apps/web` as a new Vercel project (root directory: `apps/web`).
-2. The app reads the API URL at runtime from a client-side setting in the
-   **Chrome extension / login screen**, and the extension defaults to the API
-   URL stored in its popup. Set a Next.js env var if you want a default:
-   - `NEXT_PUBLIC_API_URL` — default API origin the web app talks to.
-3. Deploy. The web app is a static client; CORS must allow the Vercel origin
-   (the API currently sends `Access-Control-Allow-Origin: *`, which works for
-   public deployments).
+---
 
-## 4. Chrome extension
+## 5. Chrome extension
 
-1. Open `chrome://extensions`, enable **Developer mode**.
-2. **Load unpacked** → `extensions/chrome`.
-3. Open the popup, set your API URL, and **Sign in** with the credentials you
-   registered against the deployed API (or an API key).
-4. Record steps, pick a project + test, and push. `Authorization: Bearer` (or
-   `x-api-key`) is sent automatically.
+`chrome://extensions` → Load unpacked → `extensions/chrome` → set API URL → Sign in (email/password or API key) → record → select project/test → Push.
 
-## Scheduling in production
+---
 
-Scheduled runs execute in the API process on a 30-second tick. If you scale to
-multiple API replicas, each instance runs the scheduler — use a single replica
-for the scheduler instance, or externalize scheduling (e.g. cron hitting
-`POST /api/tests/:id/runs`) to avoid duplicate runs.
+## 6. Already in the product (P1–P3 code)
 
-## Verifying a deployment
+| Item | Implementation |
+|------|----------------|
+| Self-healing selectors | `healLocate` in `local-runner.ts` |
+| Multi-browser + grid | `settings.browser`, `PLAYWRIGHT_GRID_URL` / `remoteUrl` |
+| Extension account sync | popup sign-in + project/test lists |
+| Teams + invites | `/teams`, `/api/teams/.../invites` |
+| Admin panel | `/admin` |
+| CORS allowlist | `CORS_ORIGINS` |
+| Redis scheduler lock | `REDIS_URL` + `redis-lock.ts` |
+| S3 artifacts | `s3-artifacts.ts` when S3_* set |
 
-```bash
-# API health
-curl -s https://<api-url>/health
+---
 
-# Auth required (AUTH_DISABLED=false)
-curl -s https://<api-url>/api/auth/me \
-  -H "Authorization: Bearer <token>"
+## 7. Ops (P1–P2)
 
-# Create a project + env + test, run it
-curl -s -X POST https://<api-url>/api/projects \
-  -H "Authorization: Bearer <token>" -H "Content-Type: application/json" \
-  -d '{"name":"Smoke"}'
-```
-
-Open the web app, add an environment pointing at your staging site, record a
-few steps, and press **Run**. Watch the step timeline for screenshots and the
-self-healing badge (a healed selector shows the original → replacement path).
+| Task | Action |
+|------|--------|
+| Artifacts survive restarts | Railway volume on `ARTIFACTS_DIR` and/or S3 |
+| Custom domain | Vercel + Railway domains; refresh `CORS_ORIGINS` + `PUBLIC_URL` |
+| Uptime | Monitor `GET /health` every 1–5 minutes |
