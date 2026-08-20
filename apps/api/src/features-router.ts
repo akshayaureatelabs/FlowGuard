@@ -136,7 +136,7 @@ featuresRouter.post("/tests/:id/clone", async (req, res) => {
   const copy = await repo.createTest(src.projectId, name);
   await repo.updateSteps(
     copy.id,
-    (src.steps || []).map((s) => ({ ...s, id: uuid() }))
+    (src.steps || []).map((s: import("@flowguard/shared").Step) => ({ ...s, id: uuid() }))
   );
   if (src.settings) await repo.updateTestSettings(copy.id, src.settings);
   const full = await repo.getTest(copy.id);
