@@ -28,3 +28,11 @@ export function computeNextRunIso(
 ): string {
   return computeNextRun(cron, intervalMinutes).toISOString();
 }
+
+/**
+ * First scheduled fire: soon (default 15s) so "Add schedule" is testable without
+ * waiting a full hour. Subsequent ticks use computeNextRun / cron.
+ */
+export function computeFirstRunIso(delaySec = 15): string {
+  return new Date(Date.now() + Math.max(5, delaySec) * 1000).toISOString();
+}
