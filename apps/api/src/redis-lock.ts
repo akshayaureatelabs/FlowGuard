@@ -4,14 +4,15 @@ import "./env.js";
 
 /**
  * Optional Redis-backed leader lock for the in-process scheduler.
- * With REDIS_URL set, only one API instance holds the lock at a time so
- * multi-instance deploys don't double-trigger schedules. Without REDIS_URL the
- * lock always grants (previous single-instance behavior unchanged).
+ * With REDIS_URL set in production, only one API instance holds the lock.
+ * Without REDIS_URL, or in local/dev when Redis is down, the lock grants so
+ * schedules still fire (single-instance local workflow).
  */
 
-const REDIS_URL = process.env.REDIS_URL || "";
+const REDIS_URL = (process.env.REDIS_URL || "").trim();
 const LOCK_KEY = "flowguard:scheduler:lock";
 const INSTANCE_ID = `${os.hostname()}:${process.pid}`;
+const IS_PROD = process.env.NODE_ENV === "production";
 
 let client: any = null;
 let lastDowngradeLog = 0;
@@ -28,15 +29,18 @@ export async function acquireSchedulerLock(ttlMs = 65_000): Promise<boolean> {
       });
     }
     const res = await client.set(LOCK_KEY, INSTANCE_ID, "PX", ttlMs, "NX");
-    return res === "OK";
+    if (res === "OK") return true;
+    // Another instance holds the lock
+    return false;
   } catch (err) {
-    // Fail closed: if Redis is unreachable we must NOT run the scheduler,
-    // otherwise multiple instances would each try to trigger the same runs.
     const now = Date.now();
     if (now - lastDowngradeLog > 30_000) {
-      console.error("[scheduler] Redis lock unavailable — skipping tick to avoid duplicate runs:", err);
+      console.error("[scheduler] Redis lock error:", err);
       lastDowngradeLog = now;
     }
-    return false;
+    // Production multi-instance: fail closed (avoid duplicate runs).
+    // Local/dev: fail open so schedules still work without Redis.
+    if (IS_PROD) return false;
+    return true;
   }
 }
