@@ -8,6 +8,7 @@ import type { Test, Environment, Step, StepResult, Module, Selector } from "@flo
 import { repo } from "./repo.js";
 import { trackRunFinished } from "./metrics.js";
 import { s3Enabled, uploadRunDir } from "./s3-artifacts.js";
+import { persistHealedSelectors } from "./persist-heals.js";
 
 export const ARTIFACTS_DIR =
   process.env.ARTIFACTS_DIR || path.join(process.cwd(), "artifacts");
@@ -483,6 +484,13 @@ export async function runLocalTest(
 
     const artifacts = await maybeUploadArtifacts(runId, runDir, results, finalShot);
     const failed = results.some((r) => r.status === "failed");
+    if (!failed) {
+      try {
+        await persistHealedSelectors(test, results);
+      } catch (err) {
+        console.warn("[heal] persist backups failed", err);
+      }
+    }
     await repo.updateRun(runId, {
       status: failed ? "failed" : "passed",
       finishedAt: new Date().toISOString(),
