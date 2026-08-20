@@ -2,24 +2,20 @@
 rootDirectory = "apps/api"
 startCommand  = "pnpm exec tsx src/index.ts"
 healthcheckPath = "/health"
+healthcheckTimeout = 30
 
 [build]
-builder = "nixpacks"
+builder = "DOCKERFILE"
+dockerfilePath = "apps/api/Dockerfile"
 
-[build.env]
-USE_DATABASE = "mongo"
-AUTH_DISABLED = "false"
-
-[run.env]
-PORT = "3001"
-USE_LOCAL_EXECUTION = "true"
-ARTIFACTS_DIR = "/tmp/flowguard-artifacts"
-JWT_SECRET = "change-me-in-production"
-RATE_LIMIT_MAX = "300"
-
-# Set in Railway dashboard (never commit real values):
-#   MONGODB_URL      → mongodb+srv://user:pass@cluster0.xxxxx.mongodb.net/flowguard
-#   AUTH_DISABLED    → false (recommended for production)
-#   PUBLIC_URL       → https://<api>.up.railway.app
-#   SMTP_HOST / SMTP_PORT / SMTP_USER / SMTP_PASS / EMAIL_FROM  → for email alerts (optional)
-#   NEXT_PUBLIC_API_URL (used by the web app) → https://<api>.up.railway.app
+# Set ALL of these in the Railway dashboard (do not commit real secrets):
+#   NODE_ENV=production
+#   USE_DATABASE=mongo
+#   MONGODB_URL=mongodb+srv://...
+#   AUTH_DISABLED=false
+#   JWT_SECRET=<long random>
+#   ADMIN_KEY=<long random, not flowguard-admin>
+#   CORS_ORIGINS=https://your-app.vercel.app
+#   PUBLIC_URL=https://your-api.up.railway.app
+# Optional:
+#   REDIS_URL, SMTP_*, EMAIL_FROM, ARTIFACTS_DIR, S3_*, PLAYWRIGHT_GRID_URL
